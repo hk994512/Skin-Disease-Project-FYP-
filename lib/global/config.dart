@@ -77,3 +77,6 @@ export 'package:flutter_local_notifications/flutter_local_notifications.dart';
 export '../notifications/notification_service.dart';
 export '../services/auth_service.dart';
 export '/auth/auth_creds.dart';
+export '../widgets/privacy_policy.dart';
+export 'package:flutter/gestures.dart';
+export '../widgets/about/terms_services.dart';

@@ -171,8 +171,12 @@ class _SettingsState extends ConsumerState<Settings> {
                   icon: _asset.privacy,
                   title: context.locale.privacyPoli,
                   subtitle: context.locale.howProtect,
-                  onTap: () =>
-                      _util.appSnackBar(context, 'Opening privacy policy'),
+                  onTap: () {
+                    showDialog(
+                      context: context,
+                      builder: (context) => PrivacyPolicyDialog(),
+                    );
+                  },
                 ),
 
                 SizedBox(height: 12.h),
@@ -180,8 +184,14 @@ class _SettingsState extends ConsumerState<Settings> {
                   icon: _asset.terms,
                   title: context.locale.terms,
                   subtitle: context.locale.legal,
-                  onTap: () =>
-                      _util.appSnackBar(context, 'Opening terms of service'),
+                  onTap: () {
+                    showDialog(
+                      context: context,
+                      builder: (context) => TermsOfServiceDialog(
+                        onClose: () => Navigator.pop(context),
+                      ),
+                    );
+                  },
                 ),
                 SizedBox(height: 12.h),
                 SettingsCard(
