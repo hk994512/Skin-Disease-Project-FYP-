@@ -1,4 +1,5 @@
-import '../global/config.dart';
+
+import '/core/config.dart';
 
 final ass = AppAssets.instance;
 

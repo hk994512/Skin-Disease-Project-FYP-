@@ -1,4 +1,4 @@
-import './global/config.dart';
+import '/core/config.dart';
 
 @pragma('vm:entry-point')
 Future<void> _firebaseBackgroundHandler(RemoteMessage message) async {

@@ -1,6 +1,4 @@
-// ignore_for_file: deprecated_member_use
-
-import '../global/config.dart';
+import '/core/config.dart';
 
 class SelectLanguageScreen extends ConsumerStatefulWidget {
   const SelectLanguageScreen({super.key});
@@ -132,10 +130,9 @@ class _SelectLanguageScreenState extends ConsumerState<SelectLanguageScreen> {
             padding: EdgeInsets.all(20.r),
             child: Container(
               decoration: BoxDecoration(
-                color:
-                    context.theme.colorScheme.surfaceContainerHighest
-                        ?.withValues(alpha: 0.5) ??
-                    Colors.grey.withOpacity(0.1),
+                color: context.theme.colorScheme.surfaceContainerHighest
+                  ..withValues(alpha: 0.5),
+                // Colors.grey.withOpacity(0.1),
                 borderRadius: BorderRadius.circular(16.r),
               ),
               child: TextField(

@@ -1,4 +1,4 @@
-import './global/config.dart';
+import 'package:clearskin_ai/core/config.dart';
 
 class LightModeColors {
   static const lightPrimary = Color(0xFF00ACC1);
