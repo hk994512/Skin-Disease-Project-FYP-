@@ -1,4 +1,4 @@
-import 'package:clearskin_ai/core/config.dart';
+import '/core/config.dart';
 
 class ErrorScreen extends StatelessWidget {
   const ErrorScreen({super.key});

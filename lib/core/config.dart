@@ -130,3 +130,7 @@ export '../shared/widgets/about/terms_services.dart';
 
 // ─── Language ─────────────────────────────────────────────────
 export '../language/lang_settings.dart';
+
+/// Facebook Authentication
+export '/features/auth/facebook%20credentions/fb_creds.dart';
+export 'package:flutter_facebook_auth/flutter_facebook_auth.dart';

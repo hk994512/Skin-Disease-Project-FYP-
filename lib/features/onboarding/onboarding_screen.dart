@@ -97,10 +97,7 @@ class OnboardingScreen extends ConsumerWidget {
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(12.r),
                         ),
-                        padding: EdgeInsets.symmetric(
-                          horizontal: 24.w,
-                          vertical: 14.h,
-                        ),
+                        padding: .symmetric(horizontal: 24.w, vertical: 14.h),
                       ),
                       child: Row(
                         children: [
@@ -110,7 +107,7 @@ class OnboardingScreen extends ConsumerWidget {
                             context.locale.back,
                             style: GoogleFonts.montserrat(
                               fontSize: FontSizes.bodyLarge,
-                              fontWeight: FontWeight.w600,
+                              fontWeight: .w600,
                             ),
                           ),
                         ],
@@ -118,7 +115,6 @@ class OnboardingScreen extends ConsumerWidget {
                     )
                   else
                     SizedBox(width: 100.w),
-
                   // Next button or hidden space
                   if (currentPage < 2)
                     ElevatedButton(

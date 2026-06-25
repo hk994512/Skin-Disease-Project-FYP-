@@ -37,6 +37,8 @@ class _SignInScreenState extends State<SignInScreen>
     }
   }
 
+  final fbInstance = FacebookAuthService.instance;
+
   @override
   Widget build(BuildContext context) {
     final colorScheme = context.theme.colorScheme;
@@ -618,7 +620,21 @@ class _SignInScreenState extends State<SignInScreen>
           context,
           icon: _asset.facebook,
           label: 'Facebook',
-          onTap: () {},
+          onTap: () async {
+            try {
+              final userData = await fbInstance.signIn();
+
+              if (userData != null && context.mounted) {
+                context.go('/homeScreen');
+              }
+            } catch (e) {
+              if (context.mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text('Facebook login failed: $e')),
+                );
+              }
+            }
+          },
         ),
       ],
     );

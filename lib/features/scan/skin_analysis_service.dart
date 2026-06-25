@@ -295,7 +295,7 @@ class SkinAnalysisService {
   static const String _scanHistoryKey = 'scan_history';
   static const String _modelAsset = 'assets/models/skin_disease_model.tflite';
   static const int _inputSize = 224;
-  static const String _apiBaseUrl = 'http://10.8.30.244:8000';
+  static const String _apiBaseUrl = 'http://10.8.154.250:8000';
 
   final _uuid = const Uuid();
   Interpreter? _interpreter;
