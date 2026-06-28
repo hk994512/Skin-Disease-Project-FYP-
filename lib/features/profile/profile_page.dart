@@ -1,5 +1,4 @@
-import 'package:clearskin_ai/core/config.dart';
-
+import '/core/config.dart';
 // Add this provider in your providers file
 final authStateProvider = StreamProvider<User?>((ref) {
   return FirebaseAuth.instance.authStateChanges();
@@ -111,16 +110,16 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
     return '${months[created.month - 1]} ${created.year}';
   }
 
-  int get _skinScore =>
-      _scanCount == 0 ? 0 : (70 + min(_scanCount * 3, 29)).clamp(0, 99).toInt();
+  // int get _skinScore =>
+  //     _scanCount == 0 ? 0 : (70 + min(_scanCount * 3, 29)).clamp(0, 99).toInt();
 
-  String get _skinScoreLabel {
-    if (_skinScore == 0) return 'No data yet';
-    if (_skinScore >= 90) return 'Excellent';
-    if (_skinScore >= 75) return 'Good';
-    if (_skinScore >= 60) return 'Fair';
-    return 'Needs attention';
-  }
+  // String get _skinScoreLabel {
+  //   if (_skinScore == 0) return 'No data yet';
+  //   if (_skinScore >= 90) return 'Excellent';
+  //   if (_skinScore >= 75) return 'Good';
+  //   if (_skinScore >= 60) return 'Fair';
+  //   return 'Needs attention';
+  // }
 
   bool get _isLoggedIn => _firebaseUser != null;
 
@@ -160,14 +159,14 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
                         ),
                       ),
                       SizedBox(height: 16.h),
-                      _FeatureItem(
-                        icon: Icons.auto_awesome_outlined,
-                        title: 'Skin Score',
-                        description: _scanCount > 0
-                            ? '$_skinScore / 100 — $_skinScoreLabel'
-                            : 'Complete your first scan to get a score',
-                        color: context.colorScheme.primary,
-                      ),
+                      // _FeatureItem(
+                      //   icon: Icons.auto_awesome_outlined,
+                      //   title: 'Skin Score',
+                      //   description: _scanCount > 0
+                      //       ? '$_skinScore / 100 — $_skinScoreLabel'
+                      //       : 'Complete your first scan to get a score',
+                      //   color: context.colorScheme.primary,
+                      // ),
                       SizedBox(height: 12.h),
                       _FeatureItem(
                         icon: Icons.history_edu_rounded,

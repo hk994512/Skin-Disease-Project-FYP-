@@ -314,7 +314,7 @@ class SkinAnalysisService {
   static const String _scanHistoryKey = 'scan_history';
   static const String _modelAsset = 'assets/models/skin_disease_model.tflite';
   static const int _inputSize = 224;
-  static const String _apiBaseUrl = 'http://10.8.30.244:8000';
+  static const String _apiBaseUrl = 'http://10.8.154.250:8000';
 
   final _uuid = const Uuid();
   Interpreter? _interpreter;
@@ -363,7 +363,7 @@ class SkinAnalysisService {
         duration: const Duration(seconds: 5),
         behavior: SnackBarBehavior.floating,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        margin: const EdgeInsets.all(16),
+        margin: const .all(16),
       ),
     );
   }
@@ -386,11 +386,6 @@ class SkinAnalysisService {
       }
       return result;
     } on NotSkinImageException {
-      // ✅ FIX: The API explicitly said "this isn't skin" (422, low skin
-      // pixel ratio). This is a deliberate classification, not a failure —
-      // rethrow immediately so the UI shows "not a skin image" instead of
-      // silently falling through to TFLite/mock, which would otherwise
-      // happily invent a disease for a non-skin photo.
       rethrow;
     } catch (e) {
       debugPrint('❌ API FAILED: $e');

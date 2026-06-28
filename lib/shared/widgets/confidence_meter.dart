@@ -13,7 +13,8 @@ class ConfidenceMeter extends StatelessWidget {
   });
 
   Color _getConfidenceColor(BuildContext context) {
-    // ✅ Use riskLevel, NOT confidence
+    // ✅ Medical UI rule: Color reflects disease risk, NOT AI certainty.
+    // A 99% confident Melanoma diagnosis should be RED (Critical), not GREEN.
     switch (riskLevel) {
       case 'Critical':
         return context.colorScheme.error; // Red
@@ -22,7 +23,7 @@ class ConfidenceMeter extends StatelessWidget {
       case 'Medium':
         return const Color(0xFFFF9800); // Orange
       default:
-        return context.colorScheme.secondary; // Green
+        return const Color(0xFF4CAF50); // Green
     }
   }
 

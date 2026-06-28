@@ -99,6 +99,7 @@ export 'package:clearskin_ai/features/auth/sign_in.dart';
 export 'package:clearskin_ai/features/auth/sign_up.dart';
 export '../features/scan/skin_analysis_service.dart';
 export '../features/scan/result_page.dart';
+export '../features/scan/disease_chat_sheet.dart';
 export '../features/scan/disease_detail_page.dart';
 export '../features/scan/diseases_info_service.dart';
  export '../features/scan/scan_page.dart';

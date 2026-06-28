@@ -16,6 +16,21 @@ class ScanHistoryCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final dateFormat = DateFormat('MMM dd, yyyy • hh:mm a');
     final percentage = (scan.confidence * 100).toInt();
+    
+    final Color confColor;
+    switch (scan.riskLevel) {
+      case 'Critical':
+        confColor = context.colorScheme.error;
+        break;
+      case 'High':
+        confColor = context.colorScheme.tertiary;
+        break;
+      case 'Medium':
+        confColor = const Color(0xFFFF9800);
+        break;
+      default:
+        confColor = const Color(0xFF4CAF50);
+    }
 
     return Dismissible(
       key: Key(scan.id),
@@ -123,13 +138,13 @@ class ScanHistoryCard extends StatelessWidget {
                           Container(
                             padding: .symmetric(horizontal: 8.w, vertical: 4.h),
                             decoration: BoxDecoration(
-                              color: context.colorScheme.primaryContainer,
+                              color: confColor.withValues(alpha: 0.15),
                               borderRadius: .circular(8.r),
                             ),
                             child: Text(
                               '$percentage% confidence',
                               style: context.textTheme.labelSmall?.copyWith(
-                                color: context.colorScheme.primary,
+                                color: confColor,
                                 fontWeight: .w600,
                               ),
                             ),

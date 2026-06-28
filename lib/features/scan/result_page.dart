@@ -35,6 +35,35 @@ class _ResultPageState extends State<ResultPage> {
         s.causes.isNotEmpty;
   }
 
+  // ── Disease → Doctor URL mapping ────────────────────────────
+  String _getDoctorUrl(String diseaseName) {
+    final name = diseaseName.toLowerCase();
+    if (name.contains('melanoma')) {
+      return 'https://www.marham.pk/doctors/oncologist';
+    } else if (name.contains('vascular')) {
+      return 'https://www.marham.pk/doctors/vascular-surgeon';
+    }
+    // Default → dermatologist
+    return 'https://www.marham.pk/doctors/dermatologist';
+  }
+
+  // ── Launch Marham doctor page ────────────────────────────────
+  Future<void> _consultDoctor(String diseaseName) async {
+    final url = Uri.parse(_getDoctorUrl(diseaseName));
+    if (await canLaunchUrl(url)) {
+      await launchUrl(url, mode: LaunchMode.externalApplication);
+    } else {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text('Could not open browser.'),
+          backgroundColor: context.colorScheme.error,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
+  }
+
   Future<void> _savePdf() async {
     bool permissionGranted = false;
 
@@ -121,13 +150,120 @@ class _ResultPageState extends State<ResultPage> {
     final rc = _riskColor(context);
     final hasData = _hasCompleteData();
 
-    // ✅ NEW: Show minimal view if data is incomplete
+    // ✅ If confidence is too low, this image is NOT a skin lesion.
+    // Show ONLY the rejection screen — no results at all.
+    if (s.confidence < 0.40) {
+      return _buildNotSkinView(context, s, loc);
+    }
+
+    // ✅ Show minimal view if data is incomplete
     if (!hasData) {
       return _buildMinimalView(context, s, rc, loc);
     }
 
-    // ✅ ORIGINAL: Show full detailed view
+    // ✅ Show full detailed view
     return _buildDetailedView(context, s, rc, loc);
+  }
+
+  // ━━ Not-a-skin-image rejection screen ──────────────────────────
+  Widget _buildNotSkinView(BuildContext context, ScanResult s, dynamic loc) {
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(loc.anaRes),
+        centerTitle: true,
+        actions: [
+          IconButton(
+            onPressed: () => context.go('/homeScreen'),
+            icon: const Icon(Icons.home_outlined),
+          ),
+        ],
+      ),
+      body: SafeArea(
+        child: Center(
+          child: Padding(
+            padding: EdgeInsets.symmetric(horizontal: 32.w),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                // Icon
+                Container(
+                  width: 120.r,
+                  height: 120.r,
+                  decoration: BoxDecoration(
+                    color: Colors.orange.withValues(alpha: 0.12),
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(
+                    Icons.hide_image_outlined,
+                    size: 60.r,
+                    color: Colors.orange,
+                  ),
+                ),
+                SizedBox(height: 28.h),
+
+                // Title
+                Text(
+                  'Not a Skin Image',
+                  style: context.textTheme.headlineSmall?.copyWith(
+                    fontWeight: FontWeight.bold,
+                    color: Colors.orange[800] ?? Colors.orange,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+                SizedBox(height: 12.h),
+
+                // Message
+                Text(
+                  'The uploaded photo does not appear to be a skin lesion image. '
+                  'Please upload a clear, close-up photo of the affected skin area with good lighting.',
+                  style: context.textTheme.bodyMedium?.copyWith(
+                    color: context.colorScheme.onSurface.withValues(alpha: 0.7),
+                    height: 1.5,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+                SizedBox(height: 36.h),
+
+                // Try Again button
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton.icon(
+                    onPressed: () => context.go('/scanPage'),
+                    icon: const Icon(Icons.camera_alt_outlined),
+                    label: const Text('Try Again'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: context.colorScheme.primary,
+                      foregroundColor: context.colorScheme.onPrimary,
+                      padding: EdgeInsets.symmetric(vertical: 16.h),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                    ),
+                  ),
+                ),
+                SizedBox(height: 12.h),
+
+                // Go Home button
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton.icon(
+                    onPressed: () => context.go('/homeScreen'),
+                    icon: const Icon(Icons.home_outlined),
+                    label: const Text('Go Home'),
+                    style: OutlinedButton.styleFrom(
+                      padding: EdgeInsets.symmetric(vertical: 14.h),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
   }
 
   // ✅ NEW: Minimal centered view for incomplete data
@@ -364,6 +500,12 @@ class _ResultPageState extends State<ResultPage> {
             ),
           ),
         ),
+      ),
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: () => showDiseaseChatSheet(context, s),
+        icon: const Icon(Icons.smart_toy_outlined),
+        label: const Text('Ask AI'),
+        tooltip: 'Learn more about this disease',
       ),
     );
   }
@@ -750,22 +892,24 @@ class _ResultPageState extends State<ResultPage> {
                   SizedBox(height: 20.h),
                 ],
 
-                // ── Learn more ──────────────────────────────────────
-                OutlinedButton.icon(
-                  onPressed: () => GoRouterHelper(
-                    context,
-                  ).pushNamed('scanResult', extra: s.diseaseName),
-                  icon: const Icon(Icons.info_outline),
-                  label: const Text('Learn More About This Condition'),
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: context.colorScheme.primary,
-                    side: BorderSide(color: context.colorScheme.primary),
-                    padding: EdgeInsets.symmetric(vertical: 16.h),
+                // ── Consult with Doctor ─────────────────────────────
+                // Marham button
+                ElevatedButton.icon(
+                  onPressed: () => _consultDoctor(s.diseaseName),
+                  icon: const Icon(Icons.local_hospital),
+                  label: const Text('Find a Doctor on Marham'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF2E7D32),
+                    foregroundColor: Colors.white,
+                    minimumSize: Size(double.infinity, 50.h),
+                    padding: EdgeInsets.symmetric(vertical: 14.h),
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(16),
                     ),
                   ),
                 ),
+
+
 
                 SizedBox(height: 12.h),
 
@@ -849,6 +993,12 @@ class _ResultPageState extends State<ResultPage> {
             ),
           ),
         ),
+      ),
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: () => showDiseaseChatSheet(context, s),
+        icon: const Icon(Icons.smart_toy_outlined),
+        label: const Text('Ask AI'),
+        tooltip: 'Learn more about this disease',
       ),
     );
   }

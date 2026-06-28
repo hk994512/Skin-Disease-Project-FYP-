@@ -30,8 +30,9 @@ IMG_SIZE   = (224, 224)
 MODEL_PATH = "../assets/models/skin_disease_model.tflite"
 
 # ── Thresholds ────────────────────────────────────────────────
-MIN_CONFIDENCE        = 0.40   # below this → "not a skin image"
-MAX_ENTROPY_THRESHOLD = 1.80   # high entropy → model is confused → not skin
+MIN_CONFIDENCE        = 0.15   # lowered from 0.40 to allow models torn between two diseases
+# High entropy → model is completely confused. Max for 7 classes is 1.945.
+MAX_ENTROPY_THRESHOLD = 1.93
 
 CLASS_INFO = {
     0: {"code": "akiec", "name": "Actinic Keratoses",    "risk": "High",     "color": "#FF4444"},
@@ -362,21 +363,17 @@ def is_likely_skin_image(img: Image.Image) -> tuple[bool, str]:
 
     r, g, b = arr[:, :, 0], arr[:, :, 1], arr[:, :, 2]
 
-    # Skin tone heuristic: R > G > B typically, with R dominant
-    skin_mask = (
-        (r > 60) & (r < 250) &
-        (g > 40) & (g < 220) &
-        (b > 20) & (b < 200) &
-        (r > g) & (g > b) &
-        ((r - g) > 10) &
-        ((r - b) > 20)
-    )
+    # Extremely forgiving skin heuristic:
+    # Human skin (all tones) and lesions naturally have more red than blue, 
+    # and red is generally >= green. We just check if at least 5% of the 
+    # image has these basic properties to filter out documents, sky, etc.
+    skin_mask = (r > 30) & (r > b + 10) & (r >= g)
 
     skin_ratio = np.sum(skin_mask) / (64 * 64)
     logger.info(f"Skin pixel ratio: {skin_ratio:.2%}")
 
-    if skin_ratio < 0.10:
-        return False, f"Only {skin_ratio:.0%} of the image contains skin-colored pixels. Please upload a clear photo of a skin lesion."
+    if skin_ratio < 0.05:
+        return False, "This does not appear to be a skin image. Please upload a clear photo of the skin lesion."
 
     return True, "ok"
 
