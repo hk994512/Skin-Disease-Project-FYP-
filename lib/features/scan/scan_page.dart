@@ -1,5 +1,4 @@
-import 'package:clearskin_ai/core/config.dart';
-
+import '/core/config.dart';
 
 class ScanPage extends StatefulWidget {
   const ScanPage({super.key});
@@ -37,17 +36,34 @@ class _ScanPageState extends State<ScanPage> {
 
   Future<void> _analyzeImage() async {
     if (_selectedImage == null || !mounted) return;
-
     setState(() => _isAnalyzing = true);
-
     try {
-      // ✅ Pass context so snackbar shows which source was used
       final result = await _analysisService.analyzeSkinImage(_selectedImage!);
-
       if (!mounted) return;
       setState(() => _isAnalyzing = false);
-
       context.go('/resPage', extra: result);
+    } on NotSkinImageException catch (e) {
+      // ── Not a skin image ──────────────────────────────────────
+      if (!mounted) return;
+      setState(() => _isAnalyzing = false);
+      showDialog(
+        context: context,
+        builder: (_) => AlertDialog(
+          icon: const Icon(
+            Icons.hide_image_outlined,
+            size: 48,
+            color: Colors.orange,
+          ),
+          title: const Text('Not a Skin Image'),
+          content: Text(e.message),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Try Again'),
+            ),
+          ],
+        ),
+      );
     } catch (e) {
       if (!mounted) return;
       setState(() => _isAnalyzing = false);
@@ -284,3 +300,5 @@ class _TipItem extends StatelessWidget {
     );
   }
 }
+
+// exceptions.dart  OR  top of skin_analysis_service.dart

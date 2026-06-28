@@ -29,6 +29,10 @@ logger = logging.getLogger(__name__)
 IMG_SIZE   = (224, 224)
 MODEL_PATH = "../assets/models/skin_disease_model.tflite"
 
+# ── Thresholds ────────────────────────────────────────────────
+MIN_CONFIDENCE        = 0.40   # below this → "not a skin image"
+MAX_ENTROPY_THRESHOLD = 1.80   # high entropy → model is confused → not skin
+
 CLASS_INFO = {
     0: {"code": "akiec", "name": "Actinic Keratoses",    "risk": "High",     "color": "#FF4444"},
     1: {"code": "bcc",   "name": "Basal Cell Carcinoma", "risk": "High",     "color": "#FF4444"},
@@ -46,7 +50,7 @@ ADVICE = {
     "Low":      "Likely benign. Monitor regularly and use sun protection.",
 }
 
-# ─── Detailed Disease Information (12-15 lines each) ──────────
+# ─── Detailed Disease Information ─────────────────────────────
 DISEASE_DETAILS = {
     "akiec": {
         "full_name":        "Actinic Keratoses & Intraepithelial Carcinoma",
@@ -145,7 +149,7 @@ DISEASE_DETAILS = {
             "Avoid scratching or picking at lesions",
             "Annual skin checks to monitor for changes"
         ],
-        "when_to_see_doctor": "See a doctor if a lesion changes rapidly, bleeds, becomes painful, or looks significantly different from your other seborrheic keratoses (the 'ugly duckling' sign).",
+        "when_to_see_doctor": "See a doctor if a lesion changes rapidly, bleeds, becomes painful, or looks significantly different from your other seborrheic keratoses.",
         "prognosis":          "Excellent. These are benign lesions with no malignant potential. They may increase in number with age but pose no health risk.",
         "affected_population": "Extremely common in adults over 50. Affects men and women equally. Rare before age 30.",
     },
@@ -153,7 +157,7 @@ DISEASE_DETAILS = {
     "df": {
         "full_name":        "Dermatofibroma",
         "also_known_as":    "Benign Fibrous Histiocytoma, Cutaneous Fibrous Histiocytoma",
-        "description":      "Dermatofibromas are common, benign skin growths that consist of fibrous tissue. They are firm nodules that most often appear on the legs, though they can occur anywhere on the body. They are completely harmless and rarely require treatment. The exact cause is unknown but they may develop in response to minor skin injuries.",
+        "description":      "Dermatofibromas are common, benign skin growths that consist of fibrous tissue. They are firm nodules that most often appear on the legs, though they can occur anywhere on the body. They are completely harmless and rarely require treatment.",
         "appearance":       "Small, firm, raised bump. Usually brown, pink, or reddish in color. Characteristically dimples inward when pinched (positive 'dimple sign'). Typically 0.5–1.5 cm in diameter.",
         "causes":           "Exact cause unknown. May be triggered by minor trauma such as insect bites, thorn pricks, or folliculitis. Represents a reactive proliferation of dermal fibroblasts.",
         "symptoms": [
@@ -177,21 +181,21 @@ DISEASE_DETAILS = {
             "Use insect repellent in endemic areas"
         ],
         "when_to_see_doctor": "Consult a doctor if the lesion grows rapidly, becomes painful, bleeds, or changes color significantly.",
-        "prognosis":          "Excellent. Dermatofibromas are benign and do not become cancerous. They may persist for years or decades without change.",
+        "prognosis":          "Excellent. Dermatofibromas are benign and do not become cancerous.",
         "affected_population": "Most common in young to middle-aged adults. More frequent in women than men. Rare in children.",
     },
 
     "mel": {
         "full_name":        "Melanoma",
         "also_known_as":    "Malignant Melanoma, Cutaneous Melanoma",
-        "description":      "Melanoma is the most dangerous form of skin cancer, arising from the pigment-producing cells (melanocytes). Although less common than basal cell or squamous cell carcinoma, melanoma is far more likely to spread to other parts of the body if not caught early. It is responsible for the majority of skin cancer deaths worldwide. Early detection is critical — survival rates drop dramatically with advanced stage.",
-        "appearance":       "Follows the ABCDE rule: Asymmetry, Border irregularity, Color variation (multiple shades of brown, black, red, white, or blue), Diameter greater than 6mm, and Evolution (changing over time). May appear as a new mole or a change in an existing mole.",
-        "causes":           "UV radiation from sun and tanning beds is the primary cause. Genetic mutations (BRAF, NRAS, NF1) play a major role. Risk factors include fair skin, family history of melanoma, many moles, weakened immune system, and history of severe sunburns.",
+        "description":      "Melanoma is the most dangerous form of skin cancer, arising from the pigment-producing cells (melanocytes). Although less common than basal cell or squamous cell carcinoma, melanoma is far more likely to spread to other parts of the body if not caught early.",
+        "appearance":       "Follows the ABCDE rule: Asymmetry, Border irregularity, Color variation (multiple shades of brown, black, red, white, or blue), Diameter greater than 6mm, and Evolution (changing over time).",
+        "causes":           "UV radiation from sun and tanning beds is the primary cause. Genetic mutations (BRAF, NRAS, NF1) play a major role. Risk factors include fair skin, family history of melanoma, many moles, weakened immune system.",
         "symptoms": [
             "Asymmetrical mole — one half doesn't match the other",
             "Irregular, ragged, notched, or blurred border",
-            "Multiple colors within the same lesion (brown, black, red, white, blue)",
-            "Diameter larger than 6mm (size of a pencil eraser)",
+            "Multiple colors within the same lesion",
+            "Diameter larger than 6mm",
             "Evolving — any change in size, shape, color, or new symptom",
             "Itching, bleeding, or oozing from a mole",
             "Satellite lesions appearing near the original mole",
@@ -213,19 +217,18 @@ DISEASE_DETAILS = {
             "Avoid tanning beds — they increase melanoma risk by 75%",
             "Perform monthly self-skin examinations",
             "Annual full-body skin exam by a dermatologist",
-            "Know your moles — photograph them to track changes",
-            "Extra vigilance if you have a family history of melanoma"
+            "Know your moles — photograph them to track changes"
         ],
-        "when_to_see_doctor": "⚠️ URGENT — See a dermatologist immediately if any mole changes in size, shape, or color, or if a new unusual growth appears. Do not wait.",
-        "prognosis":          "Stage I: 5-year survival rate ~98%. Stage II: ~65%. Stage III: ~45%. Stage IV (metastatic): ~25% but improving with immunotherapy. Early detection is life-saving.",
-        "affected_population": "Can affect anyone but most common in fair-skinned individuals. Incidence peaks between ages 45–54. Melanoma is the most common cancer in young adults aged 25–29.",
+        "when_to_see_doctor": "⚠️ URGENT — See a dermatologist immediately if any mole changes in size, shape, or color, or if a new unusual growth appears.",
+        "prognosis":          "Stage I: 5-year survival ~98%. Stage II: ~65%. Stage III: ~45%. Stage IV: ~25% but improving with immunotherapy.",
+        "affected_population": "Can affect anyone but most common in fair-skinned individuals. Incidence peaks between ages 45–54.",
     },
 
     "nv": {
         "full_name":        "Melanocytic Nevi",
         "also_known_as":    "Common Mole, Nevus, Benign Melanocytic Nevus",
-        "description":      "Melanocytic nevi, commonly known as moles, are benign growths on the skin that form when pigment cells (melanocytes) grow in clusters. Most people have between 10 and 40 moles. They are almost always harmless, but monitoring them for changes is important as a small number can develop into melanoma over time.",
-        "appearance":       "Round or oval, with a smooth, well-defined border. Uniform color — tan, brown, or black. Usually less than 6mm in diameter. May be flat or raised. Some have hair growing from them.",
+        "description":      "Melanocytic nevi, commonly known as moles, are benign growths on the skin that form when pigment cells (melanocytes) grow in clusters. Most people have between 10 and 40 moles. They are almost always harmless.",
+        "appearance":       "Round or oval, with a smooth, well-defined border. Uniform color — tan, brown, or black. Usually less than 6mm in diameter. May be flat or raised.",
         "causes":           "Formed when melanocytes grow in a cluster instead of spreading throughout the skin. Sun exposure can increase the number of moles. Genetic factors also play a role.",
         "symptoms": [
             "Small, round or oval growth on the skin",
@@ -249,17 +252,17 @@ DISEASE_DETAILS = {
             "Regular self-examination using the ABCDE rule",
             "Annual dermatologist skin check for people with many moles"
         ],
-        "when_to_see_doctor": "See a doctor if a mole changes in size, shape, or color, develops irregular borders, bleeds, itches, or looks different from your other moles.",
-        "prognosis":          "Excellent for benign nevi. The lifetime risk of any single mole becoming melanoma is very low (estimated 1 in 200,000 for an individual mole).",
-        "affected_population": "Universal — affects people of all ages, skin types, and ethnicities. Most moles appear in childhood and adolescence.",
+        "when_to_see_doctor": "See a doctor if a mole changes in size, shape, or color, develops irregular borders, bleeds, or itches.",
+        "prognosis":          "Excellent for benign nevi. The lifetime risk of any single mole becoming melanoma is very low.",
+        "affected_population": "Universal — affects people of all ages, skin types, and ethnicities.",
     },
 
     "vasc": {
         "full_name":        "Vascular Lesions",
         "also_known_as":    "Angiomas, Pyogenic Granuloma, Hemangioma, Port-Wine Stain",
-        "description":      "Vascular lesions are abnormalities of blood vessels in the skin. They encompass a wide range of conditions including cherry angiomas, spider angiomas, pyogenic granulomas, and port-wine stains. Most are benign and harmless, though some (like pyogenic granulomas) can bleed easily and may require treatment.",
-        "appearance":       "Varies widely by type. Cherry angiomas appear as small, bright red domes. Spider angiomas have a central red spot with radiating vessels. Pyogenic granulomas are red, moist, rapidly growing nodules that bleed easily. Port-wine stains are flat, pink-to-deep-red birthmarks.",
-        "causes":           "Caused by abnormal proliferation or dilation of blood vessels. Cherry angiomas are associated with aging. Pyogenic granulomas may follow minor trauma or hormonal changes (common in pregnancy). Port-wine stains result from a somatic mutation in the GNAQ gene during fetal development.",
+        "description":      "Vascular lesions are abnormalities of blood vessels in the skin. They encompass cherry angiomas, spider angiomas, pyogenic granulomas, and port-wine stains. Most are benign and harmless.",
+        "appearance":       "Varies widely by type. Cherry angiomas appear as small, bright red domes. Spider angiomas have a central red spot with radiating vessels. Pyogenic granulomas are red, moist, rapidly growing nodules.",
+        "causes":           "Caused by abnormal proliferation or dilation of blood vessels. Cherry angiomas are associated with aging. Pyogenic granulomas may follow minor trauma or hormonal changes.",
         "symptoms": [
             "Bright red, purple, or bluish discoloration on skin",
             "Small dome-shaped red bumps (cherry angiomas)",
@@ -275,18 +278,16 @@ DISEASE_DETAILS = {
             "Electrocautery for cherry angiomas and spider angiomas",
             "Surgical excision for pyogenic granulomas",
             "Sclerotherapy for larger vascular malformations",
-            "Timolol or propranolol for infantile hemangiomas",
-            "Intense pulsed light (IPL) for cosmetic improvement"
+            "Timolol or propranolol for infantile hemangiomas"
         ],
         "prevention": [
             "Sun protection to reduce development of new lesions",
             "Avoid skin trauma that can trigger pyogenic granulomas",
-            "Hormonal management during pregnancy for pregnancy-related lesions",
             "Regular monitoring for any rapid growth or bleeding"
         ],
-        "when_to_see_doctor": "See a doctor if a vascular lesion bleeds frequently, grows rapidly, is painful, or appears suddenly without obvious cause.",
-        "prognosis":          "Excellent for most vascular lesions. They are benign and do not become cancerous. Pyogenic granulomas may recur after removal. Port-wine stains are permanent without treatment.",
-        "affected_population": "Cherry angiomas are extremely common in adults over 30. Pyogenic granulomas are common in children and pregnant women. Port-wine stains affect approximately 3 in 1,000 newborns.",
+        "when_to_see_doctor": "See a doctor if a vascular lesion bleeds frequently, grows rapidly, is painful, or appears suddenly.",
+        "prognosis":          "Excellent for most vascular lesions. They are benign and do not become cancerous.",
+        "affected_population": "Cherry angiomas are extremely common in adults over 30. Pyogenic granulomas are common in children and pregnant women.",
     },
 }
 
@@ -349,14 +350,49 @@ class PredictionResult(BaseModel):
     all_predictions:  List[dict]
     disease_detail:   Optional[DiseaseDetail] = None
 
+# ─── Skin Validation ──────────────────────────────────────────
+def is_likely_skin_image(img: Image.Image) -> tuple[bool, str]:
+    """
+    Heuristic check to detect non-skin images before running the model.
+    Checks average skin-tone color range in RGB.
+    Returns (is_valid, reason).
+    """
+    img_rgb = img.convert("RGB").resize((64, 64))
+    arr = np.array(img_rgb, dtype=np.float32)
+
+    r, g, b = arr[:, :, 0], arr[:, :, 1], arr[:, :, 2]
+
+    # Skin tone heuristic: R > G > B typically, with R dominant
+    skin_mask = (
+        (r > 60) & (r < 250) &
+        (g > 40) & (g < 220) &
+        (b > 20) & (b < 200) &
+        (r > g) & (g > b) &
+        ((r - g) > 10) &
+        ((r - b) > 20)
+    )
+
+    skin_ratio = np.sum(skin_mask) / (64 * 64)
+    logger.info(f"Skin pixel ratio: {skin_ratio:.2%}")
+
+    if skin_ratio < 0.10:
+        return False, f"Only {skin_ratio:.0%} of the image contains skin-colored pixels. Please upload a clear photo of a skin lesion."
+
+    return True, "ok"
+
+def compute_entropy(probabilities: np.ndarray) -> float:
+    """Shannon entropy — high value means model is very uncertain (not skin)."""
+    probs = np.clip(probabilities, 1e-9, 1.0)
+    return float(-np.sum(probs * np.log(probs)))
+
 # ─── Preprocessing ────────────────────────────────────────────
-def preprocess_image(image_bytes: bytes) -> np.ndarray:
+def preprocess_image(image_bytes: bytes) -> tuple[np.ndarray, Image.Image]:
     with io.BytesIO(image_bytes) as buf:
         try:
             img = Image.open(buf).convert("RGB")
-            img = img.resize(IMG_SIZE, Image.LANCZOS)
-            arr = np.array(img, dtype=np.float32) / 255.0
-            return np.expand_dims(arr, axis=0)
+            resized = img.resize(IMG_SIZE, Image.LANCZOS)
+            arr = np.array(resized, dtype=np.float32) / 255.0
+            return np.expand_dims(arr, axis=0), img
         except Exception as e:
             raise HTTPException(status_code=400, detail=f"Image processing failed: {e}")
 
@@ -372,41 +408,6 @@ def run_inference(input_tensor: np.ndarray) -> np.ndarray:
 
 # ─── Endpoints ────────────────────────────────────────────────
 
-@app.get("/test_model")
-def test_model():
-    """Diagnostic endpoint — tests model with synthetic inputs to detect bias."""
-    if app_state.interpreter is None:
-        raise HTTPException(status_code=503, detail="Model not loaded.")
-
-    import numpy as np
-    tests = {
-        "black_image":  np.zeros((1, 224, 224, 3), dtype=np.float32),
-        "white_image":  np.ones((1, 224, 224, 3),  dtype=np.float32),
-        "grey_image":   np.full((1, 224, 224, 3), 0.5, dtype=np.float32),
-        "random_noise": np.random.rand(1, 224, 224, 3).astype(np.float32),
-    }
-
-    results = {}
-    for name, tensor in tests.items():
-        probs = run_inference(tensor)
-        pred_idx = int(np.argmax(probs))
-        results[name] = {
-            "predicted": CLASS_INFO[pred_idx]["name"],
-            "confidence": f"{float(probs[pred_idx]):.2%}",
-            "all_probs": {
-                CLASS_INFO[i]["code"]: round(float(p), 4)
-                for i, p in enumerate(probs)
-            },
-        }
-
-    all_same = len({v["predicted"] for v in results.values()}) == 1
-    return {
-        "model_biased": all_same,
-        "warning": "Model always predicts the same class — retrain with class weights!" if all_same else "Model looks healthy.",
-        "results": results,
-    }
-
-
 @app.get("/")
 def root():
     return {"message": "Skin Disease Prediction API is running 🚀"}
@@ -421,17 +422,41 @@ def get_classes():
 
 @app.get("/disease/{code}", response_model=DiseaseDetail)
 def get_disease_detail(code: str):
-    """Get full detailed information about a specific disease by its code."""
     if code not in DISEASE_DETAILS:
         raise HTTPException(status_code=404, detail=f"Disease code '{code}' not found.")
     return DiseaseDetail(**DISEASE_DETAILS[code])
 
+@app.get("/test_model")
+def test_model():
+    if app_state.interpreter is None:
+        raise HTTPException(status_code=503, detail="Model not loaded.")
+    tests = {
+        "black_image":  np.zeros((1, 224, 224, 3), dtype=np.float32),
+        "white_image":  np.ones((1, 224, 224, 3),  dtype=np.float32),
+        "grey_image":   np.full((1, 224, 224, 3), 0.5, dtype=np.float32),
+        "random_noise": np.random.rand(1, 224, 224, 3).astype(np.float32),
+    }
+    results = {}
+    for name, tensor in tests.items():
+        probs = run_inference(tensor)
+        pred_idx = int(np.argmax(probs))
+        results[name] = {
+            "predicted":   CLASS_INFO[pred_idx]["name"],
+            "confidence":  f"{float(probs[pred_idx]):.2%}",
+            "all_probs":   {CLASS_INFO[i]["code"]: round(float(p), 4) for i, p in enumerate(probs)},
+        }
+    all_same = len({v["predicted"] for v in results.values()}) == 1
+    return {
+        "model_biased": all_same,
+        "warning": "Model always predicts the same class — retrain!" if all_same else "Model looks healthy.",
+        "results": results,
+    }
+
 @app.post("/predict", response_model=PredictionResult)
 async def predict(file: UploadFile = File(...)):
     """
-    Upload a skin lesion image (JPG/PNG) and get a full detailed prediction.
-    Returns predicted class, confidence, risk level, probabilities,
-    and complete 12-15 line medical detail about the detected disease.
+    Upload a skin lesion image. Returns full prediction with disease details.
+    Returns 422 if the image does not appear to be a skin lesion.
     """
     if file.content_type not in ["image/jpeg", "image/jpg", "image/png"]:
         raise HTTPException(status_code=400, detail="Only JPEG/PNG images are supported.")
@@ -440,13 +465,55 @@ async def predict(file: UploadFile = File(...)):
     if len(image_bytes) > 10 * 1024 * 1024:
         raise HTTPException(status_code=400, detail="Image too large. Max 10MB.")
 
-    input_tensor  = preprocess_image(image_bytes)
+    # ── Step 1: Preprocess ────────────────────────────────────
+    input_tensor, original_img = preprocess_image(image_bytes)
+
+    # ── Step 2: Skin heuristic check ─────────────────────────
+    is_skin, reason = is_likely_skin_image(original_img)
+    if not is_skin:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "error":   "not_skin_image",
+                "message": reason,
+                "hint":    "Please upload a clear, close-up photo of the affected skin area.",
+            }
+        )
+
+    # ── Step 3: Run model ─────────────────────────────────────
     probabilities = run_inference(input_tensor)
 
+    # ── Step 4: Entropy check (model confusion = not skin) ────
+    entropy = compute_entropy(probabilities)
+    logger.info(f"Prediction entropy: {entropy:.4f}")
+
+    if entropy > MAX_ENTROPY_THRESHOLD:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "error":   "not_skin_image",
+                "message": "The image does not appear to be a skin lesion. The model could not identify any recognizable skin condition.",
+                "hint":    "Please upload a clear, close-up photo of the affected skin area with good lighting.",
+            }
+        )
+
+    # ── Step 5: Confidence check ──────────────────────────────
     predicted_idx = int(np.argmax(probabilities))
-    info          = CLASS_INFO[predicted_idx]
     confidence    = float(probabilities[predicted_idx])
-    code          = info["code"]
+
+    if confidence < MIN_CONFIDENCE:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "error":   "low_confidence",
+                "message": f"The model confidence is too low ({confidence:.0%}) to make a reliable prediction.",
+                "hint":    "Please upload a clearer, well-lit, close-up photo of the skin lesion.",
+            }
+        )
+
+    # ── Step 6: Build response ────────────────────────────────
+    info = CLASS_INFO[predicted_idx]
+    code = info["code"]
 
     all_preds = [
         {
@@ -461,7 +528,7 @@ async def predict(file: UploadFile = File(...)):
 
     detail = DiseaseDetail(**DISEASE_DETAILS[code]) if code in DISEASE_DETAILS else None
 
-    logger.info(f"Prediction: {info['name']} ({confidence:.2%})")
+    logger.info(f"✅ Prediction: {info['name']} ({confidence:.2%}) | entropy: {entropy:.3f}")
 
     return PredictionResult(
         predicted_class = code,

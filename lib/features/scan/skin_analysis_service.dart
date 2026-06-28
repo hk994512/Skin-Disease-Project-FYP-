@@ -1,5 +1,24 @@
 import 'package:clearskin_ai/core/config.dart';
 
+// ─── Custom exception ──────────────────────────────────────────
+/// Thrown when the backend API has explicitly determined that the
+/// uploaded image is NOT a skin image (HTTP 422 / low skin-pixel-ratio).
+///
+/// This is a *deliberate* classification, not a transient failure —
+/// it must propagate straight to the UI and must NOT trigger the
+/// TFLite or mock fallback paths (which would otherwise happily
+/// produce a fake disease prediction for a non-skin photo).
+class NotSkinImageException implements Exception {
+  final String message;
+  NotSkinImageException([
+    this.message =
+        'This image does not seem to be a skin image. Please use another photo.',
+  ]);
+
+  @override
+  String toString() => message;
+}
+
 // ─── Class metadata ───────────────────────────────────────────
 const _classInfo = [
   {
@@ -295,7 +314,7 @@ class SkinAnalysisService {
   static const String _scanHistoryKey = 'scan_history';
   static const String _modelAsset = 'assets/models/skin_disease_model.tflite';
   static const int _inputSize = 224;
-  static const String _apiBaseUrl = 'http://10.8.154.250:8000';
+  static const String _apiBaseUrl = 'http://10.8.30.244:8000';
 
   final _uuid = const Uuid();
   Interpreter? _interpreter;
@@ -357,7 +376,7 @@ class SkinAnalysisService {
   }) async {
     final savedImagePath = await _saveImageToLocalStorage(imageFile);
 
-    // 1️⃣ Try Railway API
+    // 1️⃣ Try API
     try {
       final result = await _analyzeViaApi(imageFile, savedImagePath);
       await saveScanResult(result);
@@ -366,11 +385,20 @@ class SkinAnalysisService {
         _showSourceSnackbar(context, AnalysisSource.api);
       }
       return result;
+    } on NotSkinImageException {
+      // ✅ FIX: The API explicitly said "this isn't skin" (422, low skin
+      // pixel ratio). This is a deliberate classification, not a failure —
+      // rethrow immediately so the UI shows "not a skin image" instead of
+      // silently falling through to TFLite/mock, which would otherwise
+      // happily invent a disease for a non-skin photo.
+      rethrow;
     } catch (e) {
       debugPrint('❌ API FAILED: $e');
     }
 
-    // 2️⃣ Fallback to local TFLite
+    // 2️⃣ Fallback to local TFLite (only reached on genuine API
+    // failure — network error, timeout, server error, etc. — never
+    // reached for a confirmed "not a skin image" classification)
     try {
       final result = await _analyzeViaLocal(imageFile, savedImagePath);
       await saveScanResult(result);
@@ -393,8 +421,7 @@ class SkinAnalysisService {
     return mock;
   }
 
-  // ─── Railway API via http ─────────────────────────────────────
-  // ─── Railway API via http ─────────────────────────────────────
+  // ─── API Analysis ─────────────────────────────────────────────
   Future<ScanResult> _analyzeViaApi(
     File imageFile,
     String savedImagePath,
@@ -420,7 +447,7 @@ class SkinAnalysisService {
 
     final request = MultipartRequest('POST', Uri.parse('$_apiBaseUrl/predict'));
 
-    // ✅ Send exact original bytes — same as what Railway website receives
+    // ✅ Send exact original bytes
     request.files.add(
       MultipartFile.fromBytes(
         'file',
@@ -444,6 +471,34 @@ class SkinAnalysisService {
 
     debugPrint('📡 Status: ${response.statusCode}');
     debugPrint('📡 Body: ${response.body}');
+
+    // ✅ FIX: 422 means the backend explicitly determined this is NOT a
+    // skin image (e.g. "Skin pixel ratio: 0.00%"). This is a deliberate,
+    // meaningful classification — not a transient/server error — so we
+    // throw a dedicated NotSkinImageException instead of a generic
+    // Exception. analyzeSkinImage() rethrows this immediately instead of
+    // falling back to TFLite/mock, so the UI can show a clean
+    // "this doesn't look like a skin image" message.
+    if (response.statusCode == 422) {
+      String reason =
+          'This image does not seem to be a skin image. Please use another photo.';
+      try {
+        final body = json.decode(response.body) as Map<String, dynamic>;
+        // FastAPI validation errors are commonly nested under "detail".
+        final detail = body['detail'];
+        if (detail is String && detail.isNotEmpty) {
+          reason = detail;
+        } else if (detail is Map && detail['message'] != null) {
+          reason = detail['message'].toString();
+        } else if (body['message'] != null) {
+          reason = body['message'].toString();
+        }
+      } catch (_) {
+        // Body wasn't parseable JSON — fall back to the default reason.
+      }
+      debugPrint('🚫 API classified image as NOT skin (422): $reason');
+      throw NotSkinImageException(reason);
+    }
 
     if (response.statusCode != 200 || response.body.isEmpty) {
       throw Exception('API ${response.statusCode}: ${response.body}');
@@ -515,7 +570,6 @@ class SkinAnalysisService {
     final decoded = decodeImage(bytes)!;
     final resized = copyResize(decoded, width: _inputSize, height: _inputSize);
 
-    // ✅ dart:typed_data import fixed — Float32List now works
     final inputBuffer = Float32List(_inputSize * _inputSize * 3);
     int idx = 0;
     for (int y = 0; y < _inputSize; y++) {
@@ -696,13 +750,3 @@ class SkinAnalysisService {
     _interpreter = null;
   }
 }
-// import 'dart:io';
-// import 'dart:typed_data';
-// import 'package:image/image.dart' as img;
-// import 'package:path_provider/path_provider.dart';
-// import 'package:shared_preferences/shared_preferences.dart';
-// import 'package:tflite_flutter/tflite_flutter.dart';
-// import 'package:uuid/uuid.dart';
-// import 'dart:convert';
-
-// import '../model/scan_result.dart';

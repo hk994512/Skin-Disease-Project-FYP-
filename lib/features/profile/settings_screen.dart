@@ -8,7 +8,27 @@ class Settings extends ConsumerStatefulWidget {
 }
 
 class _SettingsState extends ConsumerState<Settings> {
-  final APPUTILS _util = APPUTILS.instance;
+  Future<void> launchEmail(bool isEmail) async {
+    final Uri uri = isEmail
+        ? Uri(scheme: 'mailto', path: 'hamzakhan00561@gmail.com')
+        : Uri.parse('https://github.com/hk994512/ClearSkin-AI');
+
+    if (await canLaunchUrl(uri)) {
+      await launchUrl(
+        uri,
+        mode: isEmail
+            ? LaunchMode.platformDefault
+            : LaunchMode.externalApplication,
+      );
+    } else {
+      throw Exception(
+        isEmail
+            ? 'Could not launch email client.'
+            : 'Could not open GitHub link.',
+      );
+    }
+  }
+
   final AppAssets _asset = AppAssets.instance;
   final items = [
     {'lab': 'Light mode', 'ico': Icons.wb_sunny},
@@ -149,7 +169,9 @@ class _SettingsState extends ConsumerState<Settings> {
                   icon: _asset.share,
                   title: context.locale.share,
                   subtitle: context.locale.shareApp,
-                  onTap: () => _util.appSnackBar(context, 'Coming soon!'),
+                  onTap: () {
+                    launchEmail(false);
+                  },
                 ),
                 SizedBox(height: 32.h),
                 Text(
@@ -198,7 +220,7 @@ class _SettingsState extends ConsumerState<Settings> {
                   icon: _asset.help,
                   title: context.locale.helpSupport,
                   subtitle: context.locale.getHelp,
-                  onTap: () => _util.appSnackBar(context, 'Opening support'),
+                  onTap: () => launchEmail(true),
                 ),
                 SizedBox(height: 12.h),
                 Text(

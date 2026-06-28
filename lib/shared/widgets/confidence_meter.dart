@@ -2,14 +2,28 @@ import 'package:clearskin_ai/core/config.dart';
 
 class ConfidenceMeter extends StatelessWidget {
   final double confidence;
+  final String riskLevel;
   final double size;
 
-  const ConfidenceMeter({super.key, required this.confidence, this.size = 120});
+  const ConfidenceMeter({
+    super.key,
+    required this.confidence,
+    required this.riskLevel,
+    this.size = 120,
+  });
 
   Color _getConfidenceColor(BuildContext context) {
-    if (confidence >= 0.80) return context.colorScheme.secondary;
-    if (confidence >= 0.60) return const Color(0xFFFF9800);
-    return context.colorScheme.tertiary;
+    // ✅ Use riskLevel, NOT confidence
+    switch (riskLevel) {
+      case 'Critical':
+        return context.colorScheme.error; // Red
+      case 'High':
+        return context.colorScheme.tertiary; // Orange/Red
+      case 'Medium':
+        return const Color(0xFFFF9800); // Orange
+      default:
+        return context.colorScheme.secondary; // Green
+    }
   }
 
   String get _getConfidenceLabel {
@@ -24,13 +38,13 @@ class ConfidenceMeter extends StatelessWidget {
     final color = _getConfidenceColor(context);
 
     return Column(
-      mainAxisSize: .min,
+      mainAxisSize: MainAxisSize.min,
       children: [
         SizedBox(
           width: size.w,
           height: size.h,
           child: Stack(
-            alignment: .center,
+            alignment: Alignment.center,
             children: [
               SizedBox(
                 width: size.w,

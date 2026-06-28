@@ -1,5 +1,7 @@
 // ignore_for_file: unused_import
-
+export 'package:url_launcher/url_launcher.dart';
+export 'package:device_info_plus/device_info_plus.dart';
+export 'package:permission_handler/permission_handler.dart';
 // ─── Flutter & Core ───────────────────────────────────────────
 export 'package:flutter/material.dart';
 export 'package:flutter/services.dart';
@@ -99,7 +101,8 @@ export '../features/scan/skin_analysis_service.dart';
 export '../features/scan/result_page.dart';
 export '../features/scan/disease_detail_page.dart';
 export '../features/scan/diseases_info_service.dart';
-export '../features/scan/scan_page.dart';
+ export '../features/scan/scan_page.dart';
+
 export '../features/scan/pdf_report_service.dart';
 export '../features/history/history_page.dart';
 export '../features/profile/profile_page.dart';
