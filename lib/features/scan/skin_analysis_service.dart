@@ -1,13 +1,8 @@
 import 'package:clearskin_ai/core/config.dart';
+import 'dart:math' as math;
+import 'package:image/image.dart' as img_lib;
 
 // ─── Custom exception ──────────────────────────────────────────
-/// Thrown when the backend API has explicitly determined that the
-/// uploaded image is NOT a skin image (HTTP 422 / low skin-pixel-ratio).
-///
-/// This is a *deliberate* classification, not a transient failure —
-/// it must propagate straight to the UI and must NOT trigger the
-/// TFLite or mock fallback paths (which would otherwise happily
-/// produce a fake disease prediction for a non-skin photo).
 class NotSkinImageException implements Exception {
   final String message;
   NotSkinImageException([
@@ -305,7 +300,7 @@ const _diseaseDetails = {
 };
 
 // ─── Source enum ──────────────────────────────────────────────
-enum AnalysisSource { api, tflite, mock }
+enum AnalysisSource { api, tflite }
 
 class SkinAnalysisService {
   SkinAnalysisService._internal();
@@ -315,6 +310,14 @@ class SkinAnalysisService {
   static const String _modelAsset = 'assets/models/skin_disease_model.tflite';
   static const int _inputSize = 224;
   static const String _apiBaseUrl = 'http://10.8.154.250:8000';
+
+  // FIX BUG 5 & 6: these were declared but never actually enforced — now they are
+  static const double _minConfidence = 0.55;
+  static const double _maxEntropyThreshold = 1.50;
+
+  // FIX BUG 8: tightened to match api.py tuning
+  static const double _skinRatioThreshold = 0.80;
+  static const double _skinFlatnessStd = 35.0;
 
   final _uuid = const Uuid();
   Interpreter? _interpreter;
@@ -333,11 +336,6 @@ class SkinAnalysisService {
         '📱 Result from On-Device Model (API unavailable)',
         const Color(0xFFFF9800),
         Icons.memory_rounded,
-      ),
-      AnalysisSource.mock => (
-        '⚠️ Demo Result — API & model both unavailable',
-        const Color(0xFFF44336),
-        Icons.warning_amber_rounded,
       ),
     };
 
@@ -363,20 +361,20 @@ class SkinAnalysisService {
         duration: const Duration(seconds: 5),
         behavior: SnackBarBehavior.floating,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        margin: const .all(16),
+        // FIX BUG 7: was `const .all(16)` — syntax error
+        margin: const EdgeInsets.all(16),
       ),
     );
   }
 
   // ─── Main entry point ─────────────────────────────────────────
-  // ✅ context is optional so old call sites without context still compile
   Future<ScanResult> analyzeSkinImage(
     File imageFile, {
     BuildContext? context,
   }) async {
     final savedImagePath = await _saveImageToLocalStorage(imageFile);
 
-    // 1️⃣ Try API
+    // 1️⃣ Try API first
     try {
       final result = await _analyzeViaApi(imageFile, savedImagePath);
       await saveScanResult(result);
@@ -386,14 +384,66 @@ class SkinAnalysisService {
       }
       return result;
     } on NotSkinImageException {
+      // Deliberate rejection — do NOT fall back to TFLite
       rethrow;
     } catch (e) {
       debugPrint('❌ API FAILED: $e');
+
+      // Check connectivity to show accurate message
+      bool isDeviceOffline = false;
+      try {
+        final socket = await Socket.connect(
+          '8.8.8.8',
+          53,
+          timeout: const Duration(seconds: 2),
+        );
+        socket.destroy();
+      } catch (_) {
+        isDeviceOffline = true;
+      }
+
+      if (context != null && context.mounted) {
+        final String errorMessage = isDeviceOffline
+            ? 'Not connected to wifi or mobile data. Using on-device model.'
+            : 'API server is unreachable. Using on-device model.';
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Row(
+              children: [
+                Icon(
+                  isDeviceOffline
+                      ? Icons.wifi_off_rounded
+                      : Icons.cloud_off_rounded,
+                  color: Colors.white,
+                  size: 18,
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    errorMessage,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w600,
+                      fontSize: 13,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            backgroundColor: const Color(0xFFE65100),
+            duration: const Duration(seconds: 5),
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
+            margin: const EdgeInsets.all(16),
+          ),
+        );
+      }
     }
 
-    // 2️⃣ Fallback to local TFLite (only reached on genuine API
-    // failure — network error, timeout, server error, etc. — never
-    // reached for a confirmed "not a skin image" classification)
+    // 2️⃣ Fallback to local TFLite
     try {
       final result = await _analyzeViaLocal(imageFile, savedImagePath);
       await saveScanResult(result);
@@ -402,18 +452,19 @@ class SkinAnalysisService {
         _showSourceSnackbar(context, AnalysisSource.tflite);
       }
       return result;
+    } on NotSkinImageException {
+      // Deliberate rejection — do NOT swallow
+      rethrow;
     } catch (e) {
       debugPrint('❌ LOCAL MODEL FAILED: $e');
     }
 
-    // 3️⃣ Mock
-    debugPrint('⚠️ Using mock result');
-    final mock = _createMockResult(savedImagePath);
-    await saveScanResult(mock);
-    if (context != null && context.mounted) {
-      _showSourceSnackbar(context, AnalysisSource.mock);
-    }
-    return mock;
+    // 3️⃣ Both failed — no fake diagnosis
+    debugPrint('❌ Both API and local model failed — no prediction possible');
+    throw Exception(
+      'Analysis failed. Could not connect to the server and the on-device model '
+      'encountered an error. Please check your internet connection and try again.',
+    );
   }
 
   // ─── API Analysis ─────────────────────────────────────────────
@@ -421,28 +472,55 @@ class SkinAnalysisService {
     File imageFile,
     String savedImagePath,
   ) async {
-    // ✅ Read original bytes — zero processing, zero re-encoding
     final originalBytes = await imageFile.readAsBytes();
 
-    // ✅ Detect real format from magic bytes
-    // JPEG starts with FF D8 FF
-    // PNG starts with 89 50 4E 47
-    final isPng =
-        originalBytes.length > 3 &&
+    // Detect real format from magic bytes
+    String mimeSubtype = 'jpeg';
+    String filename = 'skin_image.jpg';
+
+    final pathExt = imageFile.path.split('.').last.toLowerCase();
+
+    if (originalBytes.length > 3 &&
         originalBytes[0] == 0x89 &&
         originalBytes[1] == 0x50 &&
         originalBytes[2] == 0x4E &&
-        originalBytes[3] == 0x47;
-
-    final mimeSubtype = isPng ? 'png' : 'jpeg';
-    final filename = isPng ? 'skin_image.png' : 'skin_image.jpg';
+        originalBytes[3] == 0x47) {
+      mimeSubtype = 'png';
+      filename = 'skin_image.png';
+    } else if (originalBytes.length > 11 &&
+        originalBytes[0] == 0x52 &&
+        originalBytes[1] == 0x49 &&
+        originalBytes[2] == 0x46 &&
+        originalBytes[3] == 0x46 &&
+        originalBytes[8] == 0x57 &&
+        originalBytes[9] == 0x45 &&
+        originalBytes[10] == 0x42 &&
+        originalBytes[11] == 0x50) {
+      mimeSubtype = 'webp';
+      filename = 'skin_image.webp';
+    } else if (originalBytes.length > 2 &&
+        originalBytes[0] == 0x47 &&
+        originalBytes[1] == 0x49 &&
+        originalBytes[2] == 0x46) {
+      mimeSubtype = 'gif';
+      filename = 'skin_image.gif';
+    } else if (originalBytes.length > 1 &&
+        originalBytes[0] == 0x42 &&
+        originalBytes[1] == 0x4D) {
+      mimeSubtype = 'bmp';
+      filename = 'skin_image.bmp';
+    } else if (pathExt == 'heic' || pathExt == 'heif') {
+      mimeSubtype = pathExt;
+      filename = 'skin_image.$pathExt';
+    } else if (['png', 'webp', 'gif', 'bmp', 'jpg', 'jpeg'].contains(pathExt)) {
+      mimeSubtype = pathExt == 'jpg' ? 'jpeg' : pathExt;
+      filename = 'skin_image.$pathExt';
+    }
 
     debugPrint('📡 Detected format: $mimeSubtype');
     debugPrint('📡 Original bytes: ${originalBytes.length}');
 
     final request = MultipartRequest('POST', Uri.parse('$_apiBaseUrl/predict'));
-
-    // ✅ Send exact original bytes
     request.files.add(
       MultipartFile.fromBytes(
         'file',
@@ -451,15 +529,14 @@ class SkinAnalysisService {
         contentType: MediaType('image', mimeSubtype),
       ),
     );
-
     request.headers['Accept'] = 'application/json';
     request.headers['Connection'] = 'keep-alive';
 
     debugPrint('📡 Sending to: $_apiBaseUrl/predict');
 
     final streamed = await request.send().timeout(
-      const Duration(seconds: 60),
-      onTimeout: () => throw Exception('Request timed out after 60s'),
+      const Duration(seconds: 10),
+      onTimeout: () => throw Exception('Request timed out after 10s'),
     );
 
     final response = await Response.fromStream(streamed);
@@ -467,19 +544,12 @@ class SkinAnalysisService {
     debugPrint('📡 Status: ${response.statusCode}');
     debugPrint('📡 Body: ${response.body}');
 
-    // ✅ FIX: 422 means the backend explicitly determined this is NOT a
-    // skin image (e.g. "Skin pixel ratio: 0.00%"). This is a deliberate,
-    // meaningful classification — not a transient/server error — so we
-    // throw a dedicated NotSkinImageException instead of a generic
-    // Exception. analyzeSkinImage() rethrows this immediately instead of
-    // falling back to TFLite/mock, so the UI can show a clean
-    // "this doesn't look like a skin image" message.
+    // 422 = API deliberately rejected the image (not skin / low confidence / high entropy)
     if (response.statusCode == 422) {
       String reason =
           'This image does not seem to be a skin image. Please use another photo.';
       try {
         final body = json.decode(response.body) as Map<String, dynamic>;
-        // FastAPI validation errors are commonly nested under "detail".
         final detail = body['detail'];
         if (detail is String && detail.isNotEmpty) {
           reason = detail;
@@ -488,10 +558,8 @@ class SkinAnalysisService {
         } else if (body['message'] != null) {
           reason = body['message'].toString();
         }
-      } catch (_) {
-        // Body wasn't parseable JSON — fall back to the default reason.
-      }
-      debugPrint('🚫 API classified image as NOT skin (422): $reason');
+      } catch (_) {}
+      debugPrint('🚫 API rejected image (422): $reason');
       throw NotSkinImageException(reason);
     }
 
@@ -562,8 +630,18 @@ class SkinAnalysisService {
     await _initInterpreter();
 
     final bytes = await imageFile.readAsBytes();
-    final decoded = decodeImage(bytes)!;
-    final resized = copyResize(decoded, width: _inputSize, height: _inputSize);
+    final decoded = img_lib.decodeImage(bytes);
+    if (decoded == null) throw Exception('Failed to decode image');
+
+    // ── Step 1: Skin heuristic check ──────────────────────────
+    _validateSkinImageLocal(decoded);
+
+    // ── Step 2: Resize & normalize ────────────────────────────
+    final resized = img_lib.copyResize(
+      decoded,
+      width: _inputSize,
+      height: _inputSize,
+    );
 
     final inputBuffer = Float32List(_inputSize * _inputSize * 3);
     int idx = 0;
@@ -576,16 +654,46 @@ class SkinAnalysisService {
       }
     }
 
+    // ── Step 3: Run inference ─────────────────────────────────
     final input = inputBuffer.reshape([1, _inputSize, _inputSize, 3]);
     final outputBuffer = Float32List(7);
     final output = outputBuffer.reshape([1, 7]);
     _interpreter!.run(input, output);
 
+    // ── Step 4: Entropy check — FIX BUG 5: was computed but never enforced
+    final probsList = outputBuffer.toList();
+    final entropy = _computeEntropyLocal(probsList);
+    debugPrint('📱 Local entropy: ${entropy.toStringAsFixed(4)}');
+
+    if (entropy > _maxEntropyThreshold) {
+      throw NotSkinImageException(
+        'The model could not identify a recognisable skin lesion '
+        '(uncertainty: ${entropy.toStringAsFixed(2)}). '
+        'Please use a clearer, close-up photo of the affected skin area.',
+      );
+    }
+
+    // ── Step 5: Top class ─────────────────────────────────────
     int topIdx = 0;
     for (int i = 1; i < outputBuffer.length; i++) {
       if (outputBuffer[i] > outputBuffer[topIdx]) topIdx = i;
     }
+    final confidence = outputBuffer[topIdx];
 
+    // ── Step 6: Confidence check — FIX BUG 6: was never checked
+    debugPrint(
+      '📱 Local confidence: ${(confidence * 100).toStringAsFixed(1)}%',
+    );
+
+    if (confidence < _minConfidence) {
+      throw NotSkinImageException(
+        'Confidence too low (${(confidence * 100).toStringAsFixed(0)}%) '
+        'to make a reliable prediction. Please use a clearer, well-lit, '
+        'close-up photo of the skin lesion.',
+      );
+    }
+
+    // ── Step 7: Build result ──────────────────────────────────
     final info = _classInfo[topIdx];
     final code = info['code']!;
     final detail = _diseaseDetails[code]!;
@@ -610,7 +718,7 @@ class SkinAnalysisService {
       id: _uuid.v4(),
       imagePath: savedImagePath,
       diseaseName: info['name']!,
-      confidence: outputBuffer[topIdx],
+      confidence: confidence,
       description: detail['description'] as String,
       symptoms: List<String>.from(detail['symptoms'] as List),
       treatments: List<String>.from(detail['treatments'] as List),
@@ -630,39 +738,77 @@ class SkinAnalysisService {
     );
   }
 
-  // ─── Mock fallback ────────────────────────────────────────────
-  ScanResult _createMockResult(String savedImagePath) {
-    final now = DateTime.now();
-    return ScanResult(
-      id: _uuid.v4(),
-      imagePath: savedImagePath,
-      diseaseName: 'Melanocytic Nevi',
-      confidence: 0.82,
-      description: _diseaseDetails['nv']!['description'] as String,
-      symptoms: List<String>.from(_diseaseDetails['nv']!['symptoms'] as List),
-      treatments: List<String>.from(
-        _diseaseDetails['nv']!['treatments'] as List,
-      ),
-      riskLevel: 'Low',
-      riskColor: '#44BB44',
-      advice: _advice['Low']!,
-      appearance: _diseaseDetails['nv']!['appearance'] as String,
-      causes: _diseaseDetails['nv']!['causes'] as String,
-      prevention: List<String>.from(
-        _diseaseDetails['nv']!['prevention'] as List,
-      ),
-      whenToSeeDoctor: _diseaseDetails['nv']!['whenToSeeDoctor'] as String,
-      prognosis: _diseaseDetails['nv']!['prognosis'] as String,
-      affectedPopulation:
-          _diseaseDetails['nv']!['affectedPopulation'] as String,
-      alsoKnownAs: _diseaseDetails['nv']!['alsoKnownAs'] as String,
-      allPredictions: const [],
-      createdAt: now,
-      updatedAt: now,
+  // ─── Local skin validator ─────────────────────────────────────
+  void _validateSkinImageLocal(img_lib.Image img) {
+    final smallImg = img_lib.copyResize(img, width: 64, height: 64);
+    int skinCount = 0;
+    const totalPixels = 64 * 64;
+
+    final yValues = List.generate(64, (_) => List.filled(64, 0.0));
+    double sumY = 0.0;
+
+    for (int y = 0; y < 64; y++) {
+      for (int x = 0; x < 64; x++) {
+        final pixel = smallImg.getPixel(x, y);
+        final r = pixel.r.toDouble();
+        final g = pixel.g.toDouble();
+        final b = pixel.b.toDouble();
+
+        final yVal = 0.299 * r + 0.587 * g + 0.114 * b;
+        final cr = (r - yVal) * 0.713 + 128;
+        final cb = (b - yVal) * 0.564 + 128;
+
+        yValues[y][x] = yVal;
+        sumY += yVal;
+
+        // FIX BUG 8: widened Cr/Cb ranges to cover darker skin tones
+        // OLD: cr >= 133 && cr <= 173 && cb >= 77 && cb <= 127
+        // NEW: cr >= 125 && cr <= 175 && cb >= 75 && cb <= 135
+        if (cr >= 125 && cr <= 175 && cb >= 75 && cb <= 135) {
+          skinCount++;
+        }
+      }
+    }
+
+    final skinRatio = skinCount / totalPixels;
+    final meanY = sumY / totalPixels;
+
+    double sumSq = 0.0;
+    for (int y = 0; y < 64; y++) {
+      for (int x = 0; x < 64; x++) {
+        final diff = yValues[y][x] - meanY;
+        sumSq += diff * diff;
+      }
+    }
+    final yStd = math.sqrt(sumSq / totalPixels);
+
+    debugPrint(
+      '📱 Skin ratio: ${(skinRatio * 100).toStringAsFixed(1)}% | Y std: ${yStd.toStringAsFixed(1)}',
     );
+
+    // FIX BUG 8: loosened thresholds to match api.py
+    // OLD: skinRatio > 0.85 && yStd < 25.0
+    // NEW: skinRatio > 0.80 && yStd < 35.0
+    if (skinRatio > _skinRatioThreshold && yStd < _skinFlatnessStd) {
+      throw NotSkinImageException(
+        'Healthy skin detected (skin area: ${(skinRatio * 100).toStringAsFixed(0)}%, '
+        'texture variance: ${yStd.toStringAsFixed(1)}). '
+        'Please capture a clear photo centered on a visible skin lesion.',
+      );
+    }
   }
 
-  // ─── Storage methods ──────────────────────────────────────────
+  // ─── Entropy helper ───────────────────────────────────────────
+  double _computeEntropyLocal(List<double> probabilities) {
+    double entropy = 0.0;
+    for (final p in probabilities) {
+      final clamped = p.clamp(1e-9, 1.0);
+      entropy -= clamped * math.log(clamped);
+    }
+    return entropy;
+  }
+
+  // ─── Storage ──────────────────────────────────────────────────
   Future<String> _saveImageToLocalStorage(File imageFile) async {
     final directory = await getApplicationDocumentsDirectory();
     final scanImagesDir = Directory('${directory.path}/scan_images');

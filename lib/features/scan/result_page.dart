@@ -150,11 +150,7 @@ class _ResultPageState extends State<ResultPage> {
     final rc = _riskColor(context);
     final hasData = _hasCompleteData();
 
-    // ✅ If confidence is too low, this image is NOT a skin lesion.
-    // Show ONLY the rejection screen — no results at all.
-    if (s.confidence < 0.40) {
-      return _buildNotSkinView(context, s, loc);
-    }
+
 
     // ✅ Show minimal view if data is incomplete
     if (!hasData) {
@@ -165,106 +161,6 @@ class _ResultPageState extends State<ResultPage> {
     return _buildDetailedView(context, s, rc, loc);
   }
 
-  // ━━ Not-a-skin-image rejection screen ──────────────────────────
-  Widget _buildNotSkinView(BuildContext context, ScanResult s, dynamic loc) {
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(loc.anaRes),
-        centerTitle: true,
-        actions: [
-          IconButton(
-            onPressed: () => context.go('/homeScreen'),
-            icon: const Icon(Icons.home_outlined),
-          ),
-        ],
-      ),
-      body: SafeArea(
-        child: Center(
-          child: Padding(
-            padding: EdgeInsets.symmetric(horizontal: 32.w),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                // Icon
-                Container(
-                  width: 120.r,
-                  height: 120.r,
-                  decoration: BoxDecoration(
-                    color: Colors.orange.withValues(alpha: 0.12),
-                    shape: BoxShape.circle,
-                  ),
-                  child: Icon(
-                    Icons.hide_image_outlined,
-                    size: 60.r,
-                    color: Colors.orange,
-                  ),
-                ),
-                SizedBox(height: 28.h),
-
-                // Title
-                Text(
-                  'Not a Skin Image',
-                  style: context.textTheme.headlineSmall?.copyWith(
-                    fontWeight: FontWeight.bold,
-                    color: Colors.orange[800] ?? Colors.orange,
-                  ),
-                  textAlign: TextAlign.center,
-                ),
-                SizedBox(height: 12.h),
-
-                // Message
-                Text(
-                  'The uploaded photo does not appear to be a skin lesion image. '
-                  'Please upload a clear, close-up photo of the affected skin area with good lighting.',
-                  style: context.textTheme.bodyMedium?.copyWith(
-                    color: context.colorScheme.onSurface.withValues(alpha: 0.7),
-                    height: 1.5,
-                  ),
-                  textAlign: TextAlign.center,
-                ),
-                SizedBox(height: 36.h),
-
-                // Try Again button
-                SizedBox(
-                  width: double.infinity,
-                  child: ElevatedButton.icon(
-                    onPressed: () => context.go('/scanPage'),
-                    icon: const Icon(Icons.camera_alt_outlined),
-                    label: const Text('Try Again'),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: context.colorScheme.primary,
-                      foregroundColor: context.colorScheme.onPrimary,
-                      padding: EdgeInsets.symmetric(vertical: 16.h),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(16),
-                      ),
-                    ),
-                  ),
-                ),
-                SizedBox(height: 12.h),
-
-                // Go Home button
-                SizedBox(
-                  width: double.infinity,
-                  child: OutlinedButton.icon(
-                    onPressed: () => context.go('/homeScreen'),
-                    icon: const Icon(Icons.home_outlined),
-                    label: const Text('Go Home'),
-                    style: OutlinedButton.styleFrom(
-                      padding: EdgeInsets.symmetric(vertical: 14.h),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(16),
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
 
   // ✅ NEW: Minimal centered view for incomplete data
   Widget _buildMinimalView(
@@ -316,7 +212,55 @@ class _ResultPageState extends State<ResultPage> {
                           ),
                   ),
 
-                  SizedBox(height: 40.h),
+                  if (s.confidence < 0.65) ...[
+                    SizedBox(height: 32.h),
+                    Container(
+                      padding: EdgeInsets.all(16.r),
+                      decoration: BoxDecoration(
+                        color: Colors.orange.withValues(alpha: 0.15),
+                        borderRadius: BorderRadius.circular(16.r),
+                        border: Border.all(
+                          color: Colors.orange.withValues(alpha: 0.5),
+                          width: 1.5,
+                        ),
+                      ),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Icon(
+                            Icons.warning_amber_rounded,
+                            color: Colors.orange[800],
+                            size: 28.r,
+                          ),
+                          SizedBox(width: 12.w),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'Low Confidence (${(s.confidence * 100).toInt()}%)',
+                                  style: context.textTheme.titleSmall?.copyWith(
+                                    fontWeight: FontWeight.bold,
+                                    color: Colors.orange[900],
+                                  ),
+                                ),
+                                SizedBox(height: 4.h),
+                                Text(
+                                  'The model is not highly certain. If you scanned healthy skin without a lesion, the model is forced to make a guess. Please only scan visible lesions.',
+                                  style: context.textTheme.bodySmall?.copyWith(
+                                    color: Colors.orange[900],
+                                    height: 1.4,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+
+                  SizedBox(height: 32.h),
 
                   // ── Confidence Meter ────────────────────────────────
                   Center(
@@ -557,6 +501,54 @@ class _ResultPageState extends State<ResultPage> {
                           ),
                         ),
                 ),
+
+                if (s.confidence < 0.65) ...[
+                  SizedBox(height: 24.h),
+                  Container(
+                    padding: EdgeInsets.all(16.r),
+                    decoration: BoxDecoration(
+                      color: Colors.orange.withValues(alpha: 0.15),
+                      borderRadius: BorderRadius.circular(16.r),
+                      border: Border.all(
+                        color: Colors.orange.withValues(alpha: 0.5),
+                        width: 1.5,
+                      ),
+                    ),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Icon(
+                          Icons.warning_amber_rounded,
+                          color: Colors.orange[800],
+                          size: 28.r,
+                        ),
+                        SizedBox(width: 12.w),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Low Confidence (${(s.confidence * 100).toInt()}%)',
+                                style: context.textTheme.titleSmall?.copyWith(
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.orange[900],
+                                ),
+                              ),
+                              SizedBox(height: 4.h),
+                              Text(
+                                'The model is not highly certain. If you scanned healthy skin without a lesion, the model is forced to make a guess. Please only scan visible lesions.',
+                                style: context.textTheme.bodySmall?.copyWith(
+                                  color: Colors.orange[900],
+                                  height: 1.4,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
 
                 SizedBox(height: 32.h),
 

@@ -38,7 +38,10 @@ class _ScanPageState extends State<ScanPage> {
     if (_selectedImage == null || !mounted) return;
     setState(() => _isAnalyzing = true);
     try {
-      final result = await _analysisService.analyzeSkinImage(_selectedImage!);
+      final result = await _analysisService.analyzeSkinImage(
+        _selectedImage!,
+        context: context,
+      );
       if (!mounted) return;
       setState(() => _isAnalyzing = false);
       context.go('/resPage', extra: result);

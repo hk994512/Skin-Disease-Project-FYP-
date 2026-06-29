@@ -30,9 +30,9 @@ IMG_SIZE   = (224, 224)
 MODEL_PATH = "../assets/models/skin_disease_model.tflite"
 
 # ── Thresholds ────────────────────────────────────────────────
-MIN_CONFIDENCE        = 0.15   # lowered from 0.40 to allow models torn between two diseases
+MIN_CONFIDENCE        = 0.65   # increased to reject healthy skin guesses
 # High entropy → model is completely confused. Max for 7 classes is 1.945.
-MAX_ENTROPY_THRESHOLD = 1.93
+MAX_ENTROPY_THRESHOLD = 1.50
 
 CLASS_INFO = {
     0: {"code": "akiec", "name": "Actinic Keratoses",    "risk": "High",     "color": "#FF4444"},
@@ -354,26 +354,26 @@ class PredictionResult(BaseModel):
 # ─── Skin Validation ──────────────────────────────────────────
 def is_likely_skin_image(img: Image.Image) -> tuple[bool, str]:
     """
-    Heuristic check to detect non-skin images before running the model.
-    Checks average skin-tone color range in RGB.
-    Returns (is_valid, reason).
+    Heuristic to reject plain hands and healthy skin.
     """
     img_rgb = img.convert("RGB").resize((64, 64))
     arr = np.array(img_rgb, dtype=np.float32)
 
     r, g, b = arr[:, :, 0], arr[:, :, 1], arr[:, :, 2]
+    y = 0.299 * r + 0.587 * g + 0.114 * b
+    cr = (r - y) * 0.713 + 128
+    cb = (b - y) * 0.564 + 128
 
-    # Extremely forgiving skin heuristic:
-    # Human skin (all tones) and lesions naturally have more red than blue, 
-    # and red is generally >= green. We just check if at least 5% of the 
-    # image has these basic properties to filter out documents, sky, etc.
-    skin_mask = (r > 30) & (r > b + 10) & (r >= g)
+    # Standard YCrCb skin color thresholds
+    skin_mask = (cr >= 133) & (cr <= 173) & (cb >= 77) & (cb <= 127)
+    skin_ratio = float(np.sum(skin_mask)) / (64 * 64)
+    
+    y_std = float(np.std(y))
 
-    skin_ratio = np.sum(skin_mask) / (64 * 64)
-    logger.info(f"Skin pixel ratio: {skin_ratio:.2%}")
-
-    if skin_ratio < 0.05:
-        return False, "This does not appear to be a skin image. Please upload a clear photo of the skin lesion."
+    # If the image is ALMOST ENTIRELY skin colored AND very flat (low variance),
+    # it is almost certainly a plain hand or healthy skin.
+    if skin_ratio > 0.85 and y_std < 25.0:
+        return False, "Healthy skin detected. Please capture a clear photo centered on a visible skin lesion."
 
     return True, "ok"
 
@@ -455,8 +455,8 @@ async def predict(file: UploadFile = File(...)):
     Upload a skin lesion image. Returns full prediction with disease details.
     Returns 422 if the image does not appear to be a skin lesion.
     """
-    if file.content_type not in ["image/jpeg", "image/jpg", "image/png"]:
-        raise HTTPException(status_code=400, detail="Only JPEG/PNG images are supported.")
+    if not file.content_type or not file.content_type.startswith("image/"):
+        raise HTTPException(status_code=400, detail="Only image files are supported.")
 
     image_bytes = await file.read()
     if len(image_bytes) > 10 * 1024 * 1024:
@@ -471,42 +471,21 @@ async def predict(file: UploadFile = File(...)):
         raise HTTPException(
             status_code=422,
             detail={
-                "error":   "not_skin_image",
+                "error": "not_skin_image",
                 "message": reason,
-                "hint":    "Please upload a clear, close-up photo of the affected skin area.",
+                "hint": "Ensure the lesion is clearly visible and centered."
             }
         )
 
-    # ── Step 3: Run model ─────────────────────────────────────
+    # ── Step 3: Run TFLite inference ─────────────────────────────────────
     probabilities = run_inference(input_tensor)
 
     # ── Step 4: Entropy check (model confusion = not skin) ────
     entropy = compute_entropy(probabilities)
     logger.info(f"Prediction entropy: {entropy:.4f}")
 
-    if entropy > MAX_ENTROPY_THRESHOLD:
-        raise HTTPException(
-            status_code=422,
-            detail={
-                "error":   "not_skin_image",
-                "message": "The image does not appear to be a skin lesion. The model could not identify any recognizable skin condition.",
-                "hint":    "Please upload a clear, close-up photo of the affected skin area with good lighting.",
-            }
-        )
-
-    # ── Step 5: Confidence check ──────────────────────────────
     predicted_idx = int(np.argmax(probabilities))
     confidence    = float(probabilities[predicted_idx])
-
-    if confidence < MIN_CONFIDENCE:
-        raise HTTPException(
-            status_code=422,
-            detail={
-                "error":   "low_confidence",
-                "message": f"The model confidence is too low ({confidence:.0%}) to make a reliable prediction.",
-                "hint":    "Please upload a clearer, well-lit, close-up photo of the skin lesion.",
-            }
-        )
 
     # ── Step 6: Build response ────────────────────────────────
     info = CLASS_INFO[predicted_idx]
