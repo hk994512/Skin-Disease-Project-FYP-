@@ -57,7 +57,7 @@ class _ScanPageState extends State<ScanPage> {
             size: 48,
             color: Colors.orange,
           ),
-          title: const Text('Not a Skin Image'),
+          title: const Text('Analysis Unsuccessful'),
           content: Text(e.message),
           actions: [
             TextButton(

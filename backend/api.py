@@ -29,10 +29,10 @@ logger = logging.getLogger(__name__)
 IMG_SIZE   = (224, 224)
 MODEL_PATH = "../assets/models/skin_disease_model.tflite"
 
-# ── Thresholds ────────────────────────────────────────────────
-MIN_CONFIDENCE        = 0.65   # increased to reject healthy skin guesses
-# High entropy → model is completely confused. Max for 7 classes is 1.945.
-MAX_ENTROPY_THRESHOLD = 1.50
+# ── Thresholds (Three-layer validation) ───────────────────────
+MIN_CONFIDENCE        = 0.40  # 3rd Layer: < 40% confidence → rejected
+MAX_ENTROPY_THRESHOLD = 1.80  # 2nd Layer: > 1.80 entropy → model confused → rejected
+MIN_SKIN_PIXEL_RATIO  = 0.10  # 1st Layer: < 10% skin pixels → rejected
 
 CLASS_INFO = {
     0: {"code": "akiec", "name": "Actinic Keratoses",    "risk": "High",     "color": "#FF4444"},
@@ -54,144 +54,145 @@ ADVICE = {
 # ─── Detailed Disease Information ─────────────────────────────
 DISEASE_DETAILS = {
     "akiec": {
-        "full_name":        "Actinic Keratoses & Intraepithelial Carcinoma",
-        "also_known_as":    "Solar Keratosis, Bowen's Disease",
-        "description":      "Actinic keratoses are rough, scaly patches on the skin caused by years of sun exposure. They are considered pre-cancerous lesions because they can progress to squamous cell carcinoma if left untreated. They commonly appear on sun-exposed areas such as the face, scalp, ears, neck, forearms, and hands.",
-        "appearance":       "Rough, dry, scaly patch of skin, typically less than 1 inch in diameter. May be flat or slightly raised, pink, red, or brown in color. The surface may be hard and wart-like.",
-        "causes":           "Prolonged or repeated exposure to ultraviolet (UV) radiation from sunlight or tanning beds. More common in people with fair skin, light hair, and light eyes.",
+        "full_name":           "Actinic Keratoses & Intraepithelial Carcinoma",
+        "also_known_as":       "Solar Keratosis, Bowen's Disease",
+        "description":         "Actinic keratoses are rough, scaly patches on the skin caused by years of sun exposure. They are considered pre-cancerous lesions because they can progress to squamous cell carcinoma if left untreated. They commonly appear on sun-exposed areas such as the face, scalp, ears, neck, forearms, and hands.",
+        "appearance":          "Rough, dry, scaly patch of skin, typically less than 1 inch in diameter. May be flat or slightly raised, pink, red, or brown in color. The surface may be hard and wart-like.",
+        "causes":              "Prolonged or repeated exposure to ultraviolet (UV) radiation from sunlight or tanning beds. More common in people with fair skin, light hair, and light eyes.",
         "symptoms": [
             "Rough, dry, scaly patch of skin",
             "Flat to slightly raised patch on the top layer of skin",
             "Hard, wart-like surface in some cases",
             "Color variations: pink, red, or brown",
             "Itching, burning, or tenderness in the affected area",
-            "New patches appearing on sun-exposed skin"
+            "New patches appearing on sun-exposed skin",
         ],
-        "treatment": [
+        # FIX: key is "treatments" (plural) to match Flutter parser
+        "treatments": [
             "Cryotherapy (freezing with liquid nitrogen)",
             "Topical medications: fluorouracil (5-FU), imiquimod, diclofenac",
             "Photodynamic therapy (PDT)",
             "Laser resurfacing",
             "Chemical peeling",
-            "Surgical excision for thicker lesions"
+            "Surgical excision for thicker lesions",
         ],
         "prevention": [
             "Apply broad-spectrum SPF 30+ sunscreen daily",
             "Wear protective clothing and wide-brimmed hats",
             "Avoid peak sun hours (10am–4pm)",
             "Never use tanning beds",
-            "Get regular skin checks by a dermatologist"
+            "Get regular skin checks by a dermatologist",
         ],
-        "when_to_see_doctor": "See a doctor if the patch bleeds, grows rapidly, becomes very tender, or does not heal within a few weeks.",
-        "prognosis":          "With early treatment, prognosis is excellent. Untreated lesions have a 5–10% chance of progressing to squamous cell carcinoma over 10 years.",
+        "when_to_see_doctor":  "See a doctor if the patch bleeds, grows rapidly, becomes very tender, or does not heal within a few weeks.",
+        "prognosis":           "With early treatment, prognosis is excellent. Untreated lesions have a 5–10% chance of progressing to squamous cell carcinoma over 10 years.",
         "affected_population": "Most common in adults over 40 with a history of significant sun exposure. Higher incidence in Australia, South Africa, and other high-UV regions.",
     },
 
     "bcc": {
-        "full_name":        "Basal Cell Carcinoma",
-        "also_known_as":    "BCC, Rodent Ulcer (in advanced cases)",
-        "description":      "Basal cell carcinoma is the most common form of skin cancer worldwide. It originates in the basal cells — the cells that line the deepest layer of the epidermis. While it rarely spreads to other parts of the body, it can cause significant local destruction if left untreated, invading surrounding tissue, nerves, and bone.",
-        "appearance":       "Pearly or waxy bump, often with visible blood vessels. May appear as a flat, flesh-colored or brown scar-like lesion. Can also present as a bleeding or scabbing sore that heals and returns.",
-        "causes":           "Cumulative UV radiation exposure is the primary cause. Genetic mutations in the PTCH1 gene (Hedgehog signaling pathway) are commonly involved. Risk increases with radiation therapy, arsenic exposure, and immunosuppression.",
+        "full_name":           "Basal Cell Carcinoma",
+        "also_known_as":       "BCC, Rodent Ulcer (in advanced cases)",
+        "description":         "Basal cell carcinoma is the most common form of skin cancer worldwide. It originates in the basal cells — the cells that line the deepest layer of the epidermis. While it rarely spreads to other parts of the body, it can cause significant local destruction if left untreated, invading surrounding tissue, nerves, and bone.",
+        "appearance":          "Pearly or waxy bump, often with visible blood vessels. May appear as a flat, flesh-colored or brown scar-like lesion. Can also present as a bleeding or scabbing sore that heals and returns.",
+        "causes":              "Cumulative UV radiation exposure is the primary cause. Genetic mutations in the PTCH1 gene (Hedgehog signaling pathway) are commonly involved. Risk increases with radiation therapy, arsenic exposure, and immunosuppression.",
         "symptoms": [
             "Pearly or waxy bump on face, ears, or neck",
             "Flat, flesh-colored or brown scar-like lesion on chest or back",
             "Bleeding or scabbing sore that heals and returns",
             "Pink growth with raised edges and a crusted center",
             "White, waxy, scar-like lesion without a clearly defined border",
-            "Visible blood vessels (telangiectasia) on the surface"
+            "Visible blood vessels (telangiectasia) on the surface",
         ],
-        "treatment": [
+        "treatments": [
             "Mohs micrographic surgery (gold standard for high-risk areas)",
             "Surgical excision with clear margins",
             "Electrodesiccation and curettage (ED&C)",
             "Cryotherapy for superficial lesions",
             "Topical imiquimod or fluorouracil for superficial BCC",
             "Radiation therapy for inoperable cases",
-            "Vismodegib or sonidegib (Hedgehog pathway inhibitors) for advanced BCC"
+            "Vismodegib or sonidegib (Hedgehog pathway inhibitors) for advanced BCC",
         ],
         "prevention": [
             "Daily use of broad-spectrum SPF 50+ sunscreen",
             "Protective clothing, hats, and UV-blocking sunglasses",
             "Avoid tanning beds completely",
             "Regular annual skin examinations",
-            "Self-examination monthly for new or changing lesions"
+            "Self-examination monthly for new or changing lesions",
         ],
-        "when_to_see_doctor": "Seek immediate evaluation for any sore that does not heal, a new shiny bump, or any lesion that bleeds without injury.",
-        "prognosis":          "Excellent with early treatment. Cure rates exceed 95% with appropriate surgery. Recurrence is possible, especially in high-risk locations like the nose and ears.",
+        "when_to_see_doctor":  "Seek immediate evaluation for any sore that does not heal, a new shiny bump, or any lesion that bleeds without injury.",
+        "prognosis":           "Excellent with early treatment. Cure rates exceed 95% with appropriate surgery. Recurrence is possible, especially in high-risk locations like the nose and ears.",
         "affected_population": "Most common in people over 50 with fair skin. Incidence is rising in younger adults due to tanning bed use and increased UV exposure.",
     },
 
     "bkl": {
-        "full_name":        "Benign Keratosis-like Lesions",
-        "also_known_as":    "Seborrheic Keratosis, Solar Lentigo, Lichen Planus-like Keratosis",
-        "description":      "Benign keratosis-like lesions are a group of non-cancerous skin growths that commonly appear as people age. Seborrheic keratoses are among the most common benign skin tumors in adults. They are completely harmless and do not require treatment unless they cause discomfort or cosmetic concern.",
-        "appearance":       "Waxy, scaly, slightly elevated growths. Color ranges from light tan to black. They often have a 'stuck-on' appearance, as if they could be scraped off. Surface may be smooth or warty.",
-        "causes":           "Exact cause is unknown. Strongly associated with aging and sun exposure. Genetic predisposition plays a role — they tend to run in families. Not caused by viruses or bacteria.",
+        "full_name":           "Benign Keratosis-like Lesions",
+        "also_known_as":       "Seborrheic Keratosis, Solar Lentigo, Lichen Planus-like Keratosis",
+        "description":         "Benign keratosis-like lesions are a group of non-cancerous skin growths that commonly appear as people age. Seborrheic keratoses are among the most common benign skin tumors in adults. They are completely harmless and do not require treatment unless they cause discomfort or cosmetic concern.",
+        "appearance":          "Waxy, scaly, slightly elevated growths. Color ranges from light tan to black. They often have a 'stuck-on' appearance, as if they could be scraped off. Surface may be smooth or warty.",
+        "causes":              "Exact cause is unknown. Strongly associated with aging and sun exposure. Genetic predisposition plays a role — they tend to run in families. Not caused by viruses or bacteria.",
         "symptoms": [
             "Waxy, rough, or scaly growth on skin surface",
             "'Stuck-on' appearance — looks pasted onto the skin",
             "Color ranging from light tan to dark brown or black",
             "Round or oval shape, typically 1mm to several centimeters",
             "Itching in some cases, especially when irritated by clothing",
-            "Multiple lesions often appearing simultaneously"
+            "Multiple lesions often appearing simultaneously",
         ],
-        "treatment": [
+        "treatments": [
             "No treatment required for asymptomatic lesions",
             "Cryotherapy (liquid nitrogen) for cosmetic removal",
             "Electrocautery and curettage",
             "Laser ablation",
             "Hydrogen peroxide 40% topical solution (Eskata — FDA approved)",
-            "Shave excision for irritated or symptomatic lesions"
+            "Shave excision for irritated or symptomatic lesions",
         ],
         "prevention": [
             "Sun protection may slow development of new lesions",
             "Regular moisturizing to reduce irritation",
             "Avoid scratching or picking at lesions",
-            "Annual skin checks to monitor for changes"
+            "Annual skin checks to monitor for changes",
         ],
-        "when_to_see_doctor": "See a doctor if a lesion changes rapidly, bleeds, becomes painful, or looks significantly different from your other seborrheic keratoses.",
-        "prognosis":          "Excellent. These are benign lesions with no malignant potential. They may increase in number with age but pose no health risk.",
+        "when_to_see_doctor":  "See a doctor if a lesion changes rapidly, bleeds, becomes painful, or looks significantly different from your other seborrheic keratoses.",
+        "prognosis":           "Excellent. These are benign lesions with no malignant potential. They may increase in number with age but pose no health risk.",
         "affected_population": "Extremely common in adults over 50. Affects men and women equally. Rare before age 30.",
     },
 
     "df": {
-        "full_name":        "Dermatofibroma",
-        "also_known_as":    "Benign Fibrous Histiocytoma, Cutaneous Fibrous Histiocytoma",
-        "description":      "Dermatofibromas are common, benign skin growths that consist of fibrous tissue. They are firm nodules that most often appear on the legs, though they can occur anywhere on the body. They are completely harmless and rarely require treatment.",
-        "appearance":       "Small, firm, raised bump. Usually brown, pink, or reddish in color. Characteristically dimples inward when pinched (positive 'dimple sign'). Typically 0.5–1.5 cm in diameter.",
-        "causes":           "Exact cause unknown. May be triggered by minor trauma such as insect bites, thorn pricks, or folliculitis. Represents a reactive proliferation of dermal fibroblasts.",
+        "full_name":           "Dermatofibroma",
+        "also_known_as":       "Benign Fibrous Histiocytoma, Cutaneous Fibrous Histiocytoma",
+        "description":         "Dermatofibromas are common, benign skin growths that consist of fibrous tissue. They are firm nodules that most often appear on the legs, though they can occur anywhere on the body. They are completely harmless and rarely require treatment.",
+        "appearance":          "Small, firm, raised bump. Usually brown, pink, or reddish in color. Characteristically dimples inward when pinched (positive 'dimple sign'). Typically 0.5–1.5 cm in diameter.",
+        "causes":              "Exact cause unknown. May be triggered by minor trauma such as insect bites, thorn pricks, or folliculitis. Represents a reactive proliferation of dermal fibroblasts.",
         "symptoms": [
             "Small, hard bump under the skin surface",
             "Brown, pink, or reddish color",
             "Dimples inward when pinched (pathognomonic dimple sign)",
             "Usually painless but may be tender or itchy",
             "Slow-growing and stable over years",
-            "Most commonly found on lower legs"
+            "Most commonly found on lower legs",
         ],
-        "treatment": [
+        "treatments": [
             "No treatment necessary for asymptomatic lesions",
             "Surgical excision if symptomatic or cosmetically bothersome",
             "Cryotherapy for superficial lesions",
             "Steroid injections to flatten the lesion",
-            "Laser treatment for cosmetic improvement"
+            "Laser treatment for cosmetic improvement",
         ],
         "prevention": [
             "No specific prevention known",
             "Protect skin from minor injuries and insect bites",
-            "Use insect repellent in endemic areas"
+            "Use insect repellent in endemic areas",
         ],
-        "when_to_see_doctor": "Consult a doctor if the lesion grows rapidly, becomes painful, bleeds, or changes color significantly.",
-        "prognosis":          "Excellent. Dermatofibromas are benign and do not become cancerous.",
+        "when_to_see_doctor":  "Consult a doctor if the lesion grows rapidly, becomes painful, bleeds, or changes color significantly.",
+        "prognosis":           "Excellent. Dermatofibromas are benign and do not become cancerous.",
         "affected_population": "Most common in young to middle-aged adults. More frequent in women than men. Rare in children.",
     },
 
     "mel": {
-        "full_name":        "Melanoma",
-        "also_known_as":    "Malignant Melanoma, Cutaneous Melanoma",
-        "description":      "Melanoma is the most dangerous form of skin cancer, arising from the pigment-producing cells (melanocytes). Although less common than basal cell or squamous cell carcinoma, melanoma is far more likely to spread to other parts of the body if not caught early.",
-        "appearance":       "Follows the ABCDE rule: Asymmetry, Border irregularity, Color variation (multiple shades of brown, black, red, white, or blue), Diameter greater than 6mm, and Evolution (changing over time).",
-        "causes":           "UV radiation from sun and tanning beds is the primary cause. Genetic mutations (BRAF, NRAS, NF1) play a major role. Risk factors include fair skin, family history of melanoma, many moles, weakened immune system.",
+        "full_name":           "Melanoma",
+        "also_known_as":       "Malignant Melanoma, Cutaneous Melanoma",
+        "description":         "Melanoma is the most dangerous form of skin cancer, arising from the pigment-producing cells (melanocytes). Although less common than basal cell or squamous cell carcinoma, melanoma is far more likely to spread to other parts of the body if not caught early.",
+        "appearance":          "Follows the ABCDE rule: Asymmetry, Border irregularity, Color variation (multiple shades of brown, black, red, white, or blue), Diameter greater than 6mm, and Evolution (changing over time).",
+        "causes":              "UV radiation from sun and tanning beds is the primary cause. Genetic mutations (BRAF, NRAS, NF1) play a major role. Risk factors include fair skin, family history of melanoma, many moles, weakened immune system.",
         "symptoms": [
             "Asymmetrical mole — one half doesn't match the other",
             "Irregular, ragged, notched, or blurred border",
@@ -200,9 +201,9 @@ DISEASE_DETAILS = {
             "Evolving — any change in size, shape, color, or new symptom",
             "Itching, bleeding, or oozing from a mole",
             "Satellite lesions appearing near the original mole",
-            "Swollen lymph nodes near the lesion (advanced stage)"
+            "Swollen lymph nodes near the lesion (advanced stage)",
         ],
-        "treatment": [
+        "treatments": [
             "Wide local excision (primary treatment for early-stage)",
             "Sentinel lymph node biopsy to check for spread",
             "Immunotherapy: pembrolizumab, nivolumab (PD-1 inhibitors)",
@@ -210,7 +211,7 @@ DISEASE_DETAILS = {
             "Combination therapy: BRAF + MEK inhibitors",
             "Radiation therapy for brain or bone metastases",
             "Chemotherapy (less common, for refractory cases)",
-            "Clinical trials for advanced or metastatic melanoma"
+            "Clinical trials for advanced or metastatic melanoma",
         ],
         "prevention": [
             "Apply SPF 50+ broad-spectrum sunscreen every 2 hours outdoors",
@@ -218,19 +219,19 @@ DISEASE_DETAILS = {
             "Avoid tanning beds — they increase melanoma risk by 75%",
             "Perform monthly self-skin examinations",
             "Annual full-body skin exam by a dermatologist",
-            "Know your moles — photograph them to track changes"
+            "Know your moles — photograph them to track changes",
         ],
-        "when_to_see_doctor": "⚠️ URGENT — See a dermatologist immediately if any mole changes in size, shape, or color, or if a new unusual growth appears.",
-        "prognosis":          "Stage I: 5-year survival ~98%. Stage II: ~65%. Stage III: ~45%. Stage IV: ~25% but improving with immunotherapy.",
+        "when_to_see_doctor":  "⚠️ URGENT — See a dermatologist immediately if any mole changes in size, shape, or color, or if a new unusual growth appears.",
+        "prognosis":           "Stage I: 5-year survival ~98%. Stage II: ~65%. Stage III: ~45%. Stage IV: ~25% but improving with immunotherapy.",
         "affected_population": "Can affect anyone but most common in fair-skinned individuals. Incidence peaks between ages 45–54.",
     },
 
     "nv": {
-        "full_name":        "Melanocytic Nevi",
-        "also_known_as":    "Common Mole, Nevus, Benign Melanocytic Nevus",
-        "description":      "Melanocytic nevi, commonly known as moles, are benign growths on the skin that form when pigment cells (melanocytes) grow in clusters. Most people have between 10 and 40 moles. They are almost always harmless.",
-        "appearance":       "Round or oval, with a smooth, well-defined border. Uniform color — tan, brown, or black. Usually less than 6mm in diameter. May be flat or raised.",
-        "causes":           "Formed when melanocytes grow in a cluster instead of spreading throughout the skin. Sun exposure can increase the number of moles. Genetic factors also play a role.",
+        "full_name":           "Melanocytic Nevi",
+        "also_known_as":       "Common Mole, Nevus, Benign Melanocytic Nevus",
+        "description":         "Melanocytic nevi, commonly known as moles, are benign growths on the skin that form when pigment cells (melanocytes) grow in clusters. Most people have between 10 and 40 moles. They are almost always harmless.",
+        "appearance":          "Round or oval, with a smooth, well-defined border. Uniform color — tan, brown, or black. Usually less than 6mm in diameter. May be flat or raised.",
+        "causes":              "Formed when melanocytes grow in a cluster instead of spreading throughout the skin. Sun exposure can increase the number of moles. Genetic factors also play a role.",
         "symptoms": [
             "Small, round or oval growth on the skin",
             "Uniform brown, tan, or black color",
@@ -238,32 +239,32 @@ DISEASE_DETAILS = {
             "Flat or slightly raised surface",
             "Usually less than 6mm in diameter",
             "May have hair growing from the surface",
-            "Generally stable — not changing over time"
+            "Generally stable — not changing over time",
         ],
-        "treatment": [
+        "treatments": [
             "No treatment required for typical benign moles",
             "Surgical excision if mole shows atypical features",
             "Shave excision for cosmetic removal of raised moles",
             "Laser removal (not recommended for suspicious moles)",
-            "Regular monitoring with dermoscopy by a dermatologist"
+            "Regular monitoring with dermoscopy by a dermatologist",
         ],
         "prevention": [
             "Sun protection to prevent new moles from forming",
             "Avoid sunburn, especially in childhood",
             "Regular self-examination using the ABCDE rule",
-            "Annual dermatologist skin check for people with many moles"
+            "Annual dermatologist skin check for people with many moles",
         ],
-        "when_to_see_doctor": "See a doctor if a mole changes in size, shape, or color, develops irregular borders, bleeds, or itches.",
-        "prognosis":          "Excellent for benign nevi. The lifetime risk of any single mole becoming melanoma is very low.",
+        "when_to_see_doctor":  "See a doctor if a mole changes in size, shape, or color, develops irregular borders, bleeds, or itches.",
+        "prognosis":           "Excellent for benign nevi. The lifetime risk of any single mole becoming melanoma is very low.",
         "affected_population": "Universal — affects people of all ages, skin types, and ethnicities.",
     },
 
     "vasc": {
-        "full_name":        "Vascular Lesions",
-        "also_known_as":    "Angiomas, Pyogenic Granuloma, Hemangioma, Port-Wine Stain",
-        "description":      "Vascular lesions are abnormalities of blood vessels in the skin. They encompass cherry angiomas, spider angiomas, pyogenic granulomas, and port-wine stains. Most are benign and harmless.",
-        "appearance":       "Varies widely by type. Cherry angiomas appear as small, bright red domes. Spider angiomas have a central red spot with radiating vessels. Pyogenic granulomas are red, moist, rapidly growing nodules.",
-        "causes":           "Caused by abnormal proliferation or dilation of blood vessels. Cherry angiomas are associated with aging. Pyogenic granulomas may follow minor trauma or hormonal changes.",
+        "full_name":           "Vascular Lesions",
+        "also_known_as":       "Angiomas, Pyogenic Granuloma, Hemangioma, Port-Wine Stain",
+        "description":         "Vascular lesions are abnormalities of blood vessels in the skin. They encompass cherry angiomas, spider angiomas, pyogenic granulomas, and port-wine stains. Most are benign and harmless.",
+        "appearance":          "Varies widely by type. Cherry angiomas appear as small, bright red domes. Spider angiomas have a central red spot with radiating vessels. Pyogenic granulomas are red, moist, rapidly growing nodules.",
+        "causes":              "Caused by abnormal proliferation or dilation of blood vessels. Cherry angiomas are associated with aging. Pyogenic granulomas may follow minor trauma or hormonal changes.",
         "symptoms": [
             "Bright red, purple, or bluish discoloration on skin",
             "Small dome-shaped red bumps (cherry angiomas)",
@@ -271,23 +272,23 @@ DISEASE_DETAILS = {
             "Rapidly growing red nodule that bleeds easily (pyogenic granuloma)",
             "Flat pink-to-red birthmark that darkens with age (port-wine stain)",
             "Soft, compressible texture in most lesion types",
-            "Occasional bleeding with minimal trauma"
+            "Occasional bleeding with minimal trauma",
         ],
-        "treatment": [
+        "treatments": [
             "No treatment required for asymptomatic cherry angiomas",
             "Laser therapy (pulsed dye laser) — most effective for vascular lesions",
             "Electrocautery for cherry angiomas and spider angiomas",
             "Surgical excision for pyogenic granulomas",
             "Sclerotherapy for larger vascular malformations",
-            "Timolol or propranolol for infantile hemangiomas"
+            "Timolol or propranolol for infantile hemangiomas",
         ],
         "prevention": [
             "Sun protection to reduce development of new lesions",
             "Avoid skin trauma that can trigger pyogenic granulomas",
-            "Regular monitoring for any rapid growth or bleeding"
+            "Regular monitoring for any rapid growth or bleeding",
         ],
-        "when_to_see_doctor": "See a doctor if a vascular lesion bleeds frequently, grows rapidly, is painful, or appears suddenly.",
-        "prognosis":          "Excellent for most vascular lesions. They are benign and do not become cancerous.",
+        "when_to_see_doctor":  "See a doctor if a vascular lesion bleeds frequently, grows rapidly, is painful, or appears suddenly.",
+        "prognosis":           "Excellent for most vascular lesions. They are benign and do not become cancerous.",
         "affected_population": "Cherry angiomas are extremely common in adults over 30. Pyogenic granulomas are common in children and pregnant women.",
     },
 }
@@ -328,6 +329,7 @@ app.add_middleware(
 )
 
 # ─── Response Schema ──────────────────────────────────────────
+# FIX: renamed "treatment" → "treatments" to match Flutter parser
 class DiseaseDetail(BaseModel):
     full_name:           str
     also_known_as:       str
@@ -335,7 +337,7 @@ class DiseaseDetail(BaseModel):
     appearance:          str
     causes:              str
     symptoms:            List[str]
-    treatment:           List[str]
+    treatments:          List[str]   # FIX: was "treatment" — Flutter reads "treatments"
     prevention:          List[str]
     when_to_see_doctor:  str
     prognosis:           str
@@ -351,34 +353,33 @@ class PredictionResult(BaseModel):
     all_predictions:  List[dict]
     disease_detail:   Optional[DiseaseDetail] = None
 
-# ─── Skin Validation ──────────────────────────────────────────
+# ─── Skin Validation (1st Layer: RGB skin heuristic) ─────────
 def is_likely_skin_image(img: Image.Image) -> tuple[bool, str]:
-    """
-    Heuristic to reject plain hands and healthy skin.
-    """
-    img_rgb = img.convert("RGB").resize((64, 64))
-    arr = np.array(img_rgb, dtype=np.float32)
+    """RGB skin heuristic — rejects images with < 10% skin-colored pixels."""
+    img_small = img.convert("RGB").resize((64, 64))
+    arr = np.array(img_small, dtype=np.float32)
 
     r, g, b = arr[:, :, 0], arr[:, :, 1], arr[:, :, 2]
-    y = 0.299 * r + 0.587 * g + 0.114 * b
+    y  = 0.299 * r + 0.587 * g + 0.114 * b
     cr = (r - y) * 0.713 + 128
     cb = (b - y) * 0.564 + 128
 
-    # Standard YCrCb skin color thresholds
-    skin_mask = (cr >= 133) & (cr <= 173) & (cb >= 77) & (cb <= 127)
+    skin_mask  = (cr >= 133) & (cr <= 173) & (cb >= 77) & (cb <= 127)
     skin_ratio = float(np.sum(skin_mask)) / (64 * 64)
-    
-    y_std = float(np.std(y))
 
-    # If the image is ALMOST ENTIRELY skin colored AND very flat (low variance),
-    # it is almost certainly a plain hand or healthy skin.
-    if skin_ratio > 0.85 and y_std < 25.0:
-        return False, "Healthy skin detected. Please capture a clear photo centered on a visible skin lesion."
+    logger.info(f"Skin pixel ratio: {skin_ratio:.2%}")
+
+    if skin_ratio < MIN_SKIN_PIXEL_RATIO:
+        return False, (
+            f"This image does not appear to contain recognizable skin "
+            f"(skin pixel ratio: {skin_ratio:.0%} < 10%). "
+            f"Please upload a clear photo of the affected skin area."
+        )
 
     return True, "ok"
 
 def compute_entropy(probabilities: np.ndarray) -> float:
-    """Shannon entropy — high value means model is very uncertain (not skin)."""
+    """Shannon entropy — high value means model is very uncertain."""
     probs = np.clip(probabilities, 1e-9, 1.0)
     return float(-np.sum(probs * np.log(probs)))
 
@@ -387,6 +388,16 @@ def preprocess_image(image_bytes: bytes) -> tuple[np.ndarray, Image.Image]:
     with io.BytesIO(image_bytes) as buf:
         try:
             img = Image.open(buf).convert("RGB")
+
+            # Center-crop to square (preserves aspect ratio)
+            w, h = img.size
+            side = min(w, h)
+            left   = (w - side) // 2
+            top    = (h - side) // 2
+            right  = left + side
+            bottom = top + side
+            img = img.crop((left, top, right, bottom))
+
             resized = img.resize(IMG_SIZE, Image.LANCZOS)
             arr = np.array(resized, dtype=np.float32) / 255.0
             return np.expand_dims(arr, axis=0), img
@@ -438,9 +449,9 @@ def test_model():
         probs = run_inference(tensor)
         pred_idx = int(np.argmax(probs))
         results[name] = {
-            "predicted":   CLASS_INFO[pred_idx]["name"],
-            "confidence":  f"{float(probs[pred_idx]):.2%}",
-            "all_probs":   {CLASS_INFO[i]["code"]: round(float(p), 4) for i, p in enumerate(probs)},
+            "predicted":  CLASS_INFO[pred_idx]["name"],
+            "confidence": f"{float(probs[pred_idx]):.2%}",
+            "all_probs":  {CLASS_INFO[i]["code"]: round(float(p), 4) for i, p in enumerate(probs)},
         }
     all_same = len({v["predicted"] for v in results.values()}) == 1
     return {
@@ -471,25 +482,51 @@ async def predict(file: UploadFile = File(...)):
         raise HTTPException(
             status_code=422,
             detail={
-                "error": "not_skin_image",
+                "error":   "not_skin_image",
                 "message": reason,
-                "hint": "Ensure the lesion is clearly visible and centered."
+                "hint":    "Ensure the lesion is clearly visible and centered.",
+            },
+        )
+
+    # ── Step 3: Run TFLite inference ──────────────────────────
+    probabilities = run_inference(input_tensor)
+    # ── Step 4: Entropy & confidence ───────────────────────────
+    entropy       = compute_entropy(probabilities)
+    predicted_idx = int(np.argmax(probabilities))
+    confidence    = float(probabilities[predicted_idx])
+    logger.info(f"Prediction entropy: {entropy:.4f} | confidence: {confidence:.2%}")
+
+    # 2nd Layer: Shannon entropy check (> 1.80 → model confused → rejected)
+    if entropy > MAX_ENTROPY_THRESHOLD:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "error": "high_uncertainty",
+                "message": f"The model is too confused to make a diagnosis (entropy: {entropy:.2f} > 1.80). This image may not contain a skin disease from our supported list.",
+                "hint": "Please use a clearer, close-up photo of the skin lesion."
             }
         )
 
-    # ── Step 3: Run TFLite inference ─────────────────────────────────────
-    probabilities = run_inference(input_tensor)
+    # 3rd Layer: Confidence threshold (< 40% → rejected)
+    if confidence < MIN_CONFIDENCE:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "error": "low_confidence",
+                "message": f"This image does not strongly match any of our 7 supported skin diseases (confidence: {confidence:.0%} < 40%). It may be healthy skin or an unsupported condition.",
+                "hint": "Our model only covers: Actinic Keratoses, Basal Cell Carcinoma, Benign Keratosis, Dermatofibroma, Melanoma, Melanocytic Nevi, Vascular Lesions."
+            }
+        )
 
-    # ── Step 4: Entropy check (model confusion = not skin) ────
-    entropy = compute_entropy(probabilities)
-    logger.info(f"Prediction entropy: {entropy:.4f}")
+    logger.info(f"Prediction entropy: {entropy:.4f} | confidence: {confidence:.2%}")
 
-    predicted_idx = int(np.argmax(probabilities))
-    confidence    = float(probabilities[predicted_idx])
-
-    # ── Step 6: Build response ────────────────────────────────
+    # ── Step 5: Build response ────────────────────────────────
     info = CLASS_INFO[predicted_idx]
     code = info["code"]
+
+    # Guard: log clearly if code is missing from DISEASE_DETAILS
+    if code not in DISEASE_DETAILS:
+        logger.error(f"❌ Code '{code}' missing from DISEASE_DETAILS — returning null detail")
 
     all_preds = [
         {

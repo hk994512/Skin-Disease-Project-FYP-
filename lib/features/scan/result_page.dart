@@ -150,8 +150,6 @@ class _ResultPageState extends State<ResultPage> {
     final rc = _riskColor(context);
     final hasData = _hasCompleteData();
 
-
-
     // ✅ Show minimal view if data is incomplete
     if (!hasData) {
       return _buildMinimalView(context, s, rc, loc);
@@ -160,7 +158,6 @@ class _ResultPageState extends State<ResultPage> {
     // ✅ Show full detailed view
     return _buildDetailedView(context, s, rc, loc);
   }
-
 
   // ✅ NEW: Minimal centered view for incomplete data
   Widget _buildMinimalView(
@@ -900,8 +897,6 @@ class _ResultPageState extends State<ResultPage> {
                     ),
                   ),
                 ),
-
-
 
                 SizedBox(height: 12.h),
 

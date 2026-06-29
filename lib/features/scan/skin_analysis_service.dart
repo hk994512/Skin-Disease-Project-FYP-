@@ -309,15 +309,18 @@ class SkinAnalysisService {
   static const String _scanHistoryKey = 'scan_history';
   static const String _modelAsset = 'assets/models/skin_disease_model.tflite';
   static const int _inputSize = 224;
-  static const String _apiBaseUrl = 'http://10.8.154.250:8000';
+  static const String _apiBaseUrl = 'http://10.8.30.244:8000';
 
-  // FIX BUG 5 & 6: these were declared but never actually enforced — now they are
-  static const double _minConfidence = 0.55;
-  static const double _maxEntropyThreshold = 1.50;
+  // Three-layer validation:
+  //   1st Layer: RGB skin heuristic (skin pixel ratio < 10% → rejected)
+  //   2nd Layer: Shannon entropy check (entropy > 1.80 → model confused → rejected)
+  //   3rd Layer: Confidence threshold (< 40% → rejected)
+  static const double _minConfidence = 0.40;
+  static const double _maxEntropyThreshold = 1.80;
 
-  // FIX BUG 8: tightened to match api.py tuning
-  static const double _skinRatioThreshold = 0.80;
-  static const double _skinFlatnessStd = 35.0;
+  static const double _skinRatioThreshold = 0.10;
+  static const double _skinFlatnessStd =
+      -1.0; // Not used in three-layer validation
 
   final _uuid = const Uuid();
   Interpreter? _interpreter;
@@ -388,59 +391,6 @@ class SkinAnalysisService {
       rethrow;
     } catch (e) {
       debugPrint('❌ API FAILED: $e');
-
-      // Check connectivity to show accurate message
-      bool isDeviceOffline = false;
-      try {
-        final socket = await Socket.connect(
-          '8.8.8.8',
-          53,
-          timeout: const Duration(seconds: 2),
-        );
-        socket.destroy();
-      } catch (_) {
-        isDeviceOffline = true;
-      }
-
-      if (context != null && context.mounted) {
-        final String errorMessage = isDeviceOffline
-            ? 'Not connected to wifi or mobile data. Using on-device model.'
-            : 'API server is unreachable. Using on-device model.';
-
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Row(
-              children: [
-                Icon(
-                  isDeviceOffline
-                      ? Icons.wifi_off_rounded
-                      : Icons.cloud_off_rounded,
-                  color: Colors.white,
-                  size: 18,
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Text(
-                    errorMessage,
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.w600,
-                      fontSize: 13,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-            backgroundColor: const Color(0xFFE65100),
-            duration: const Duration(seconds: 5),
-            behavior: SnackBarBehavior.floating,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(12),
-            ),
-            margin: const EdgeInsets.all(16),
-          ),
-        );
-      }
     }
 
     // 2️⃣ Fallback to local TFLite
@@ -535,8 +485,8 @@ class SkinAnalysisService {
     debugPrint('📡 Sending to: $_apiBaseUrl/predict');
 
     final streamed = await request.send().timeout(
-      const Duration(seconds: 10),
-      onTimeout: () => throw Exception('Request timed out after 10s'),
+      const Duration(seconds: 30),
+      onTimeout: () => throw Exception('Request timed out after 30s'),
     );
 
     final response = await Response.fromStream(streamed);
@@ -585,7 +535,7 @@ class SkinAnalysisService {
     final prognosis = dd['prognosis'] as String? ?? '';
     final affectedPopulation = dd['affected_population'] as String? ?? '';
     final symptoms = List<String>.from((dd['symptoms'] as List?) ?? []);
-    final treatments = List<String>.from((dd['treatment'] as List?) ?? []);
+    final treatments = List<String>.from((dd['treatments'] as List?) ?? []);
     final prevention = List<String>.from((dd['prevention'] as List?) ?? []);
 
     final rawPreds = data['all_predictions'] as List? ?? [];
@@ -636,9 +586,22 @@ class SkinAnalysisService {
     // ── Step 1: Skin heuristic check ──────────────────────────
     _validateSkinImageLocal(decoded);
 
-    // ── Step 2: Resize & normalize ────────────────────────────
-    final resized = img_lib.copyResize(
+    // ── Step 2: Center-crop & Resize ───────────────────────
+    final int minDim = decoded.width < decoded.height
+        ? decoded.width
+        : decoded.height;
+    final int cropX = (decoded.width - minDim) ~/ 2;
+    final int cropY = (decoded.height - minDim) ~/ 2;
+    final cropped = img_lib.copyCrop(
       decoded,
+      x: cropX,
+      y: cropY,
+      width: minDim,
+      height: minDim,
+    );
+
+    final resized = img_lib.copyResize(
+      cropped,
       width: _inputSize,
       height: _inputSize,
     );
@@ -687,9 +650,9 @@ class SkinAnalysisService {
 
     if (confidence < _minConfidence) {
       throw NotSkinImageException(
-        'Confidence too low (${(confidence * 100).toStringAsFixed(0)}%) '
-        'to make a reliable prediction. Please use a clearer, well-lit, '
-        'close-up photo of the skin lesion.',
+        'This image does not strongly match any of our 7 supported skin diseases '
+        '(confidence: ${(confidence * 100).toStringAsFixed(0)}% < 40%). '
+        'It may be healthy skin or an unsupported condition.',
       );
     }
 
