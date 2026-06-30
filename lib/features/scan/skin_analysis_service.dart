@@ -50,6 +50,8 @@ const _advice = {
   'High': 'Please schedule a dermatologist appointment soon.',
   'Medium': 'Monitor the lesion and consult a doctor if it changes.',
   'Low': 'Likely benign. Monitor regularly.',
+  'Safe':
+      'No concerning lesion detected. Continue monthly self-checks and sun protection.',
 };
 
 const _diseaseDetails = {
@@ -311,16 +313,15 @@ class SkinAnalysisService {
   static const int _inputSize = 224;
   static const String _apiBaseUrl = 'http://10.8.30.244:8000';
 
-  // Three-layer validation:
-  //   1st Layer: RGB skin heuristic (skin pixel ratio < 10% → rejected)
-  //   2nd Layer: Shannon entropy check (entropy > 1.80 → model confused → rejected)
-  //   3rd Layer: Confidence threshold (< 40% → rejected)
-  static const double _minConfidence = 0.40;
-  static const double _maxEntropyThreshold = 1.80;
-
-  static const double _skinRatioThreshold = 0.10;
-  static const double _skinFlatnessStd =
-      -1.0; // Not used in three-layer validation
+  // Rejection + normal-skin thresholds (mirrors backend/api.py)
+  static const double _minSkinPixelRatio = 0.10;
+  static const double _healthySkinRatio = 0.75;
+  static const double _healthySkinYStdMax = 35.0;
+  static const double _minConfidence = 0.55;
+  static const double _minMargin = 0.15;
+  static const double _maxEntropyNormal = 1.65;
+  static const double _highRiskMinConf = 0.65;
+  static const double _highRiskMinMargin = 0.18;
 
   final _uuid = const Uuid();
   Interpreter? _interpreter;
@@ -525,6 +526,7 @@ class SkinAnalysisService {
     final riskLevel = data['risk_level'] as String? ?? 'Low';
     final riskColor = data['risk_color'] as String? ?? '#44BB44';
     final advice = data['advice'] as String? ?? '';
+    final isNormal = data['is_normal'] as bool? ?? false;
 
     final dd = (data['disease_detail'] as Map<String, dynamic>?) ?? {};
     final alsoKnownAs = dd['also_known_as'] as String? ?? '';
@@ -549,7 +551,9 @@ class SkinAnalysisService {
       imagePath: savedImagePath,
       diseaseName: displayName.isNotEmpty ? displayName : predictedClass,
       confidence: confidence,
-      description: description,
+      description: isNormal
+          ? 'No concerning skin lesion was detected in this image. Your skin appears normal based on our analysis.'
+          : description,
       symptoms: symptoms,
       treatments: treatments,
       riskLevel: riskLevel,
@@ -557,14 +561,24 @@ class SkinAnalysisService {
       advice: advice,
       appearance: appearance,
       causes: causes,
-      prevention: prevention,
-      whenToSeeDoctor: whenToSeeDoctor,
-      prognosis: prognosis,
+      prevention: isNormal
+          ? const [
+              'Apply broad-spectrum SPF 30+ sunscreen daily',
+              'Perform monthly self-skin examinations',
+              'Avoid tanning beds and peak sun hours',
+              'Consult a dermatologist for routine annual check-ups',
+            ]
+          : prevention,
+      whenToSeeDoctor: isNormal
+          ? 'See a dermatologist if you notice any new, changing, or unusual spots on your skin.'
+          : whenToSeeDoctor,
+      prognosis: isNormal ? 'No lesion detected. Continue regular monitoring.' : prognosis,
       affectedPopulation: affectedPopulation,
       alsoKnownAs: alsoKnownAs,
       allPredictions: allPreds,
       createdAt: now,
       updatedAt: now,
+      isNormal: isNormal,
     );
   }
 
@@ -584,7 +598,14 @@ class SkinAnalysisService {
     if (decoded == null) throw Exception('Failed to decode image');
 
     // ── Step 1: Skin heuristic check ──────────────────────────
-    _validateSkinImageLocal(decoded);
+    final texture = _analyzeSkinTextureLocal(decoded);
+    if (texture.skinRatio < _minSkinPixelRatio) {
+      throw NotSkinImageException(
+        'This image does not appear to contain recognizable skin '
+        '(skin pixel ratio: ${(texture.skinRatio * 100).toStringAsFixed(0)}% < 10%). '
+        'Please upload a clear photo of the affected skin area.',
+      );
+    }
 
     // ── Step 2: Center-crop & Resize ───────────────────────
     final int minDim = decoded.width < decoded.height
@@ -623,44 +644,23 @@ class SkinAnalysisService {
     final output = outputBuffer.reshape([1, 7]);
     _interpreter!.run(input, output);
 
-    // ── Step 4: Entropy check — FIX BUG 5: was computed but never enforced
+    // ── Step 4: Parse inference output ────────────────────────
     final probsList = outputBuffer.toList();
     final entropy = _computeEntropyLocal(probsList);
     debugPrint('📱 Local entropy: ${entropy.toStringAsFixed(4)}');
 
-    if (entropy > _maxEntropyThreshold) {
-      throw NotSkinImageException(
-        'The model could not identify a recognisable skin lesion '
-        '(uncertainty: ${entropy.toStringAsFixed(2)}). '
-        'Please use a clearer, close-up photo of the affected skin area.',
-      );
-    }
-
-    // ── Step 5: Top class ─────────────────────────────────────
     int topIdx = 0;
     for (int i = 1; i < outputBuffer.length; i++) {
       if (outputBuffer[i] > outputBuffer[topIdx]) topIdx = i;
     }
     final confidence = outputBuffer[topIdx];
 
-    // ── Step 6: Confidence check — FIX BUG 6: was never checked
+    final sorted = List<double>.from(probsList)..sort((a, b) => b.compareTo(a));
+    final margin = sorted[0] - sorted[1];
+
     debugPrint(
-      '📱 Local confidence: ${(confidence * 100).toStringAsFixed(1)}%',
+      '📱 Local confidence: ${(confidence * 100).toStringAsFixed(1)}% | margin: ${(margin * 100).toStringAsFixed(1)}%',
     );
-
-    if (confidence < _minConfidence) {
-      throw NotSkinImageException(
-        'This image does not strongly match any of our 7 supported skin diseases '
-        '(confidence: ${(confidence * 100).toStringAsFixed(0)}% < 40%). '
-        'It may be healthy skin or an unsupported condition.',
-      );
-    }
-
-    // ── Step 7: Build result ──────────────────────────────────
-    final info = _classInfo[topIdx];
-    final code = info['code']!;
-    final detail = _diseaseDetails[code]!;
-    final now = DateTime.now();
 
     final allPreds =
         List.generate(
@@ -676,6 +676,23 @@ class SkinAnalysisService {
             a['probability'] as double,
           ),
         );
+
+    // ── Step 5: Normal vs disease decision ────────────────────
+    if (_shouldClassifyAsNormal(
+      probsList,
+      texture.skinRatio,
+      texture.yStd,
+      topIdx,
+    )) {
+      debugPrint('✅ Local: classified as normal skin');
+      return _buildNormalResult(savedImagePath, allPreds, entropy);
+    }
+
+    // ── Step 6: Build disease result ──────────────────────────
+    final info = _classInfo[topIdx];
+    final code = info['code']!;
+    final detail = _diseaseDetails[code]!;
+    final now = DateTime.now();
 
     return ScanResult(
       id: _uuid.v4(),
@@ -698,11 +715,14 @@ class SkinAnalysisService {
       allPredictions: allPreds,
       createdAt: now,
       updatedAt: now,
+      isNormal: false,
     );
   }
 
-  // ─── Local skin validator ─────────────────────────────────────
-  void _validateSkinImageLocal(img_lib.Image img) {
+  // ─── Skin texture analysis ────────────────────────────────────
+  ({double skinRatio, double yStd}) _analyzeSkinTextureLocal(
+    img_lib.Image img,
+  ) {
     final smallImg = img_lib.copyResize(img, width: 64, height: 64);
     int skinCount = 0;
     const totalPixels = 64 * 64;
@@ -724,10 +744,8 @@ class SkinAnalysisService {
         yValues[y][x] = yVal;
         sumY += yVal;
 
-        // FIX BUG 8: widened Cr/Cb ranges to cover darker skin tones
-        // OLD: cr >= 133 && cr <= 173 && cb >= 77 && cb <= 127
-        // NEW: cr >= 125 && cr <= 175 && cb >= 75 && cb <= 135
-        if (cr >= 125 && cr <= 175 && cb >= 75 && cb <= 135) {
+        // Match backend YCrCb skin ranges
+        if (cr >= 133 && cr <= 173 && cb >= 77 && cb <= 127) {
           skinCount++;
         }
       }
@@ -749,16 +767,73 @@ class SkinAnalysisService {
       '📱 Skin ratio: ${(skinRatio * 100).toStringAsFixed(1)}% | Y std: ${yStd.toStringAsFixed(1)}',
     );
 
-    // FIX BUG 8: loosened thresholds to match api.py
-    // OLD: skinRatio > 0.85 && yStd < 25.0
-    // NEW: skinRatio > 0.80 && yStd < 35.0
-    if (skinRatio > _skinRatioThreshold && yStd < _skinFlatnessStd) {
-      throw NotSkinImageException(
-        'Healthy skin detected (skin area: ${(skinRatio * 100).toStringAsFixed(0)}%, '
-        'texture variance: ${yStd.toStringAsFixed(1)}). '
-        'Please capture a clear photo centered on a visible skin lesion.',
-      );
+    return (skinRatio: skinRatio, yStd: yStd);
+  }
+
+  bool _shouldClassifyAsNormal(
+    List<double> probabilities,
+    double skinRatio,
+    double yStd,
+    int predictedIdx,
+  ) {
+    final sorted = List<double>.from(probabilities)..sort((a, b) => b.compareTo(a));
+    final confidence = sorted[0];
+    final margin = sorted[0] - sorted[1];
+    final entropy = _computeEntropyLocal(probabilities);
+    final risk = _classInfo[predictedIdx]['risk']!;
+
+    if (skinRatio >= _healthySkinRatio && yStd < _healthySkinYStdMax) {
+      return true;
     }
+    if (skinRatio < 0.25) return true;
+    if (confidence < _minConfidence) return true;
+    if (entropy > _maxEntropyNormal) return true;
+    if (margin < _minMargin) return true;
+    if ((risk == 'Critical' || risk == 'High') &&
+        (confidence < _highRiskMinConf || margin < _highRiskMinMargin)) {
+      return true;
+    }
+    return false;
+  }
+
+  ScanResult _buildNormalResult(
+    String savedImagePath,
+    List<Map<String, dynamic>> allPreds,
+    double entropy,
+  ) {
+    final normalConfidence = math.max(0.70, 1.0 - entropy / 2.0);
+    final now = DateTime.now();
+    return ScanResult(
+      id: _uuid.v4(),
+      imagePath: savedImagePath,
+      diseaseName: 'Normal Skin — No Lesion Detected',
+      confidence: normalConfidence,
+      description:
+          'No concerning skin lesion was detected in this image. '
+          'Your skin appears normal based on our analysis.',
+      symptoms: const [],
+      treatments: const [],
+      riskLevel: 'Safe',
+      riskColor: '#2196F3',
+      advice: _advice['Safe']!,
+      appearance: '',
+      causes: '',
+      prevention: const [
+        'Apply broad-spectrum SPF 30+ sunscreen daily',
+        'Perform monthly self-skin examinations',
+        'Avoid tanning beds and peak sun hours',
+        'Consult a dermatologist for routine annual check-ups',
+      ],
+      whenToSeeDoctor:
+          'See a dermatologist if you notice any new, changing, or unusual spots on your skin.',
+      prognosis: 'No lesion detected. Continue regular monitoring.',
+      affectedPopulation: '',
+      alsoKnownAs: '',
+      allPredictions: allPreds,
+      createdAt: now,
+      updatedAt: now,
+      isNormal: true,
+    );
   }
 
   // ─── Entropy helper ───────────────────────────────────────────

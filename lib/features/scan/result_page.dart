@@ -13,6 +13,9 @@ class _ResultPageState extends State<ResultPage> {
   bool _pdfSaved = false;
 
   Color _riskColor(BuildContext context) {
+    if (widget.scanResult.isNormal) {
+      return const Color(0xFF2196F3);
+    }
     switch (widget.scanResult.riskLevel) {
       case 'Critical':
         return context.colorScheme.error;
@@ -148,6 +151,11 @@ class _ResultPageState extends State<ResultPage> {
     final s = widget.scanResult;
     final loc = context.locale;
     final rc = _riskColor(context);
+
+    if (s.isNormal) {
+      return _buildNormalView(context, s, rc, loc);
+    }
+
     final hasData = _hasCompleteData();
 
     // ✅ Show minimal view if data is incomplete
@@ -157,6 +165,198 @@ class _ResultPageState extends State<ResultPage> {
 
     // ✅ Show full detailed view
     return _buildDetailedView(context, s, rc, loc);
+  }
+
+  Widget _buildNormalView(
+    BuildContext context,
+    ScanResult s,
+    Color rc,
+    dynamic loc,
+  ) {
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(loc.anaRes),
+        centerTitle: true,
+        actions: [
+          IconButton(
+            onPressed: () => context.go('/homeScreen'),
+            icon: const Icon(Icons.home_outlined),
+          ),
+        ],
+      ),
+      body: SafeArea(
+        child: SingleChildScrollView(
+          child: Padding(
+            padding: EdgeInsets.all(24.r),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(20),
+                  child: File(s.imagePath).existsSync()
+                      ? Image.file(
+                          File(s.imagePath),
+                          height: 200.h,
+                          width: double.infinity,
+                          fit: BoxFit.cover,
+                        )
+                      : Container(
+                          height: 200.h,
+                          color: context.colorScheme.surfaceContainerHighest,
+                          child: Icon(
+                            Icons.image_not_supported,
+                            color: context.colorScheme.onSurface.withValues(
+                              alpha: 0.3,
+                            ),
+                            size: 60.r,
+                          ),
+                        ),
+                ),
+                SizedBox(height: 32.h),
+                Icon(
+                  Icons.verified_outlined,
+                  color: rc,
+                  size: 72.r,
+                ),
+                SizedBox(height: 16.h),
+                Text(
+                  'All Clear',
+                  style: context.textTheme.headlineMedium?.copyWith(
+                    fontWeight: FontWeight.bold,
+                    color: rc,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+                SizedBox(height: 8.h),
+                Text(
+                  s.diseaseName,
+                  style: context.textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w600,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+                SizedBox(height: 24.h),
+                Container(
+                  padding: EdgeInsets.all(20.r),
+                  decoration: BoxDecoration(
+                    color: rc.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(color: rc.withValues(alpha: 0.3)),
+                  ),
+                  child: Column(
+                    children: [
+                      Container(
+                        padding: EdgeInsets.symmetric(
+                          horizontal: 12.w,
+                          vertical: 6.h,
+                        ),
+                        decoration: BoxDecoration(
+                          color: rc,
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                        child: Text(
+                          s.riskLevel,
+                          style: context.textTheme.labelSmall?.copyWith(
+                            color: Colors.white,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                      SizedBox(height: 16.h),
+                      Text(
+                        s.description,
+                        style: context.textTheme.bodyMedium?.copyWith(
+                          height: 1.5,
+                        ),
+                        textAlign: TextAlign.center,
+                      ),
+                      SizedBox(height: 12.h),
+                      Text(
+                        s.advice,
+                        style: context.textTheme.bodyMedium?.copyWith(
+                          color: rc,
+                          fontWeight: FontWeight.w600,
+                          height: 1.4,
+                        ),
+                        textAlign: TextAlign.center,
+                      ),
+                    ],
+                  ),
+                ),
+                if (s.prevention.isNotEmpty) ...[
+                  SizedBox(height: 24.h),
+                  Text(
+                    'Stay Healthy',
+                    style: context.textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  SizedBox(height: 12.h),
+                  ...s.prevention.map(
+                    (tip) => Padding(
+                      padding: EdgeInsets.only(bottom: 8.h),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Icon(Icons.check_circle_outline, color: rc, size: 20.r),
+                          SizedBox(width: 8.w),
+                          Expanded(
+                            child: Text(
+                              tip,
+                              style: context.textTheme.bodyMedium,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+                SizedBox(height: 24.h),
+                Container(
+                  padding: EdgeInsets.all(16.r),
+                  decoration: BoxDecoration(
+                    color: context.colorScheme.surfaceContainerHighest,
+                    borderRadius: BorderRadius.circular(12.r),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(
+                        Icons.info_outline,
+                        color: context.colorScheme.onSurface.withValues(alpha: 0.6),
+                        size: 24.r,
+                      ),
+                      SizedBox(width: 12.w),
+                      Expanded(
+                        child: Text(
+                          'This is an AI screening tool, not a medical diagnosis. '
+                          'Consult a dermatologist if you notice any changes.',
+                          style: context.textTheme.bodySmall?.copyWith(height: 1.4),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                SizedBox(height: 24.h),
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton.icon(
+                    onPressed: () => context.go('/scanScreen'),
+                    icon: const Icon(Icons.camera_alt_outlined),
+                    label: const Text('Scan Again'),
+                    style: ElevatedButton.styleFrom(
+                      padding: EdgeInsets.symmetric(vertical: 16.h),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
   }
 
   // ✅ NEW: Minimal centered view for incomplete data

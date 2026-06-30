@@ -29,10 +29,15 @@ logger = logging.getLogger(__name__)
 IMG_SIZE   = (224, 224)
 MODEL_PATH = "../assets/models/skin_disease_model.tflite"
 
-# ── Thresholds (Three-layer validation) ───────────────────────
-MIN_CONFIDENCE        = 0.40  # 3rd Layer: < 40% confidence → rejected
-MAX_ENTROPY_THRESHOLD = 1.80  # 2nd Layer: > 1.80 entropy → model confused → rejected
-MIN_SKIN_PIXEL_RATIO  = 0.10  # 1st Layer: < 10% skin pixels → rejected
+# ── Thresholds ────────────────────────────────────────────────
+MIN_SKIN_PIXEL_RATIO   = 0.10   # < 10% skin pixels → not a skin image (reject)
+HEALTHY_SKIN_RATIO     = 0.75   # uniform skin photo → report as normal
+HEALTHY_SKIN_Y_STD_MAX = 35.0   # low texture variance → likely no visible lesion
+MIN_CONFIDENCE         = 0.55   # below this → normal (no lesion detected)
+MIN_MARGIN             = 0.15   # top1−top2 gap below this → normal
+MAX_ENTROPY_NORMAL     = 1.65   # above this → model too uncertain → normal
+HIGH_RISK_MIN_CONF     = 0.65   # Critical/High diseases need stronger evidence
+HIGH_RISK_MIN_MARGIN   = 0.18
 
 CLASS_INFO = {
     0: {"code": "akiec", "name": "Actinic Keratoses",    "risk": "High",     "color": "#FF4444"},
@@ -49,6 +54,15 @@ ADVICE = {
     "High":     "Please schedule a dermatologist appointment soon.",
     "Medium":   "Monitor the lesion and consult a doctor if it changes.",
     "Low":      "Likely benign. Monitor regularly and use sun protection.",
+    "Safe":     "No concerning lesion detected. Continue monthly self-checks and sun protection.",
+}
+
+NORMAL_RESULT = {
+    "predicted_class": "normal",
+    "display_name":    "Normal Skin — No Lesion Detected",
+    "risk_level":      "Safe",
+    "risk_color":      "#2196F3",
+    "advice":          ADVICE["Safe"],
 }
 
 # ─── Detailed Disease Information ─────────────────────────────
@@ -352,10 +366,11 @@ class PredictionResult(BaseModel):
     advice:           str
     all_predictions:  List[dict]
     disease_detail:   Optional[DiseaseDetail] = None
+    is_normal:        bool = False
 
-# ─── Skin Validation (1st Layer: RGB skin heuristic) ─────────
-def is_likely_skin_image(img: Image.Image) -> tuple[bool, str]:
-    """RGB skin heuristic — rejects images with < 10% skin-colored pixels."""
+# ─── Skin texture analysis (RGB YCrCb heuristic) ──────────────
+def analyze_skin_texture(img: Image.Image) -> tuple[float, float]:
+    """Return (skin_pixel_ratio, luminance_std) for a 64×64 downsample."""
     img_small = img.convert("RGB").resize((64, 64))
     arr = np.array(img_small, dtype=np.float32)
 
@@ -366,7 +381,14 @@ def is_likely_skin_image(img: Image.Image) -> tuple[bool, str]:
 
     skin_mask  = (cr >= 133) & (cr <= 173) & (cb >= 77) & (cb <= 127)
     skin_ratio = float(np.sum(skin_mask)) / (64 * 64)
+    y_std      = float(np.std(y))
 
+    return skin_ratio, y_std
+
+
+def is_likely_skin_image(img: Image.Image) -> tuple[bool, str]:
+    """Reject images with too few skin-colored pixels."""
+    skin_ratio, _ = analyze_skin_texture(img)
     logger.info(f"Skin pixel ratio: {skin_ratio:.2%}")
 
     if skin_ratio < MIN_SKIN_PIXEL_RATIO:
@@ -377,6 +399,46 @@ def is_likely_skin_image(img: Image.Image) -> tuple[bool, str]:
         )
 
     return True, "ok"
+
+
+def should_classify_as_normal(
+    probabilities: np.ndarray,
+    skin_ratio: float,
+    y_std: float,
+    predicted_idx: int,
+) -> tuple[bool, str]:
+    """
+    Decide whether to report 'Normal / Safe' instead of a disease label.
+    A 7-class model always picks some class — this guards against false positives.
+    """
+    sorted_probs = np.sort(probabilities)[::-1]
+    confidence   = float(sorted_probs[0])
+    margin       = float(sorted_probs[0] - sorted_probs[1])
+    entropy      = compute_entropy(probabilities)
+    risk         = CLASS_INFO[predicted_idx]["risk"]
+
+    if skin_ratio >= HEALTHY_SKIN_RATIO and y_std < HEALTHY_SKIN_Y_STD_MAX:
+        return True, "uniform_healthy_skin"
+
+    if skin_ratio < 0.25:
+        return True, "low_skin_content"
+
+    if confidence < MIN_CONFIDENCE:
+        return True, "low_confidence"
+
+    if entropy > MAX_ENTROPY_NORMAL:
+        return True, "high_entropy"
+
+    if margin < MIN_MARGIN:
+        return True, "low_margin"
+
+    if risk in ("Critical", "High") and (
+        confidence < HIGH_RISK_MIN_CONF or margin < HIGH_RISK_MIN_MARGIN
+    ):
+        return True, "insufficient_evidence_for_high_risk"
+
+    return False, ""
+
 
 def compute_entropy(probabilities: np.ndarray) -> float:
     """Shannon entropy — high value means model is very uncertain."""
@@ -488,45 +550,15 @@ async def predict(file: UploadFile = File(...)):
             },
         )
 
+    skin_ratio, y_std = analyze_skin_texture(original_img)
+    logger.info(f"Skin texture — ratio: {skin_ratio:.2%}, Y std: {y_std:.1f}")
+
     # ── Step 3: Run TFLite inference ──────────────────────────
     probabilities = run_inference(input_tensor)
-    # ── Step 4: Entropy & confidence ───────────────────────────
     entropy       = compute_entropy(probabilities)
     predicted_idx = int(np.argmax(probabilities))
     confidence    = float(probabilities[predicted_idx])
-    logger.info(f"Prediction entropy: {entropy:.4f} | confidence: {confidence:.2%}")
-
-    # 2nd Layer: Shannon entropy check (> 1.80 → model confused → rejected)
-    if entropy > MAX_ENTROPY_THRESHOLD:
-        raise HTTPException(
-            status_code=422,
-            detail={
-                "error": "high_uncertainty",
-                "message": f"The model is too confused to make a diagnosis (entropy: {entropy:.2f} > 1.80). This image may not contain a skin disease from our supported list.",
-                "hint": "Please use a clearer, close-up photo of the skin lesion."
-            }
-        )
-
-    # 3rd Layer: Confidence threshold (< 40% → rejected)
-    if confidence < MIN_CONFIDENCE:
-        raise HTTPException(
-            status_code=422,
-            detail={
-                "error": "low_confidence",
-                "message": f"This image does not strongly match any of our 7 supported skin diseases (confidence: {confidence:.0%} < 40%). It may be healthy skin or an unsupported condition.",
-                "hint": "Our model only covers: Actinic Keratoses, Basal Cell Carcinoma, Benign Keratosis, Dermatofibroma, Melanoma, Melanocytic Nevi, Vascular Lesions."
-            }
-        )
-
-    logger.info(f"Prediction entropy: {entropy:.4f} | confidence: {confidence:.2%}")
-
-    # ── Step 5: Build response ────────────────────────────────
-    info = CLASS_INFO[predicted_idx]
-    code = info["code"]
-
-    # Guard: log clearly if code is missing from DISEASE_DETAILS
-    if code not in DISEASE_DETAILS:
-        logger.error(f"❌ Code '{code}' missing from DISEASE_DETAILS — returning null detail")
+    logger.info(f"Raw prediction entropy: {entropy:.4f} | confidence: {confidence:.2%}")
 
     all_preds = [
         {
@@ -538,6 +570,35 @@ async def predict(file: UploadFile = File(...)):
         for i, p in enumerate(probabilities)
     ]
     all_preds.sort(key=lambda x: x["probability"], reverse=True)
+
+    # ── Step 4: Normal vs disease decision ───────────────────
+    is_normal, normal_reason = should_classify_as_normal(
+        probabilities, skin_ratio, y_std, predicted_idx,
+    )
+
+    if is_normal:
+        # Report certainty as inverse of model confusion (user-friendly score)
+        normal_confidence = round(max(0.70, 1.0 - entropy / 2.0), 6)
+        logger.info(f"✅ Normal skin ({normal_reason}) | model top guess was {CLASS_INFO[predicted_idx]['name']} @ {confidence:.2%}")
+
+        return PredictionResult(
+            predicted_class = NORMAL_RESULT["predicted_class"],
+            display_name    = NORMAL_RESULT["display_name"],
+            confidence      = normal_confidence,
+            risk_level      = NORMAL_RESULT["risk_level"],
+            risk_color      = NORMAL_RESULT["risk_color"],
+            advice          = NORMAL_RESULT["advice"],
+            all_predictions = all_preds,
+            disease_detail  = None,
+            is_normal       = True,
+        )
+
+    # ── Step 5: Build disease response ────────────────────────
+    info = CLASS_INFO[predicted_idx]
+    code = info["code"]
+
+    if code not in DISEASE_DETAILS:
+        logger.error(f"❌ Code '{code}' missing from DISEASE_DETAILS — returning null detail")
 
     detail = DiseaseDetail(**DISEASE_DETAILS[code]) if code in DISEASE_DETAILS else None
 
@@ -552,6 +613,7 @@ async def predict(file: UploadFile = File(...)):
         advice          = ADVICE[info["risk"]],
         all_predictions = all_preds,
         disease_detail  = detail,
+        is_normal       = False,
     )
 
 # ─── Run ──────────────────────────────────────────────────────

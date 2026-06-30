@@ -22,6 +22,7 @@ class ScanResult {
   final String affectedPopulation;
   final String alsoKnownAs;
   final List<Map<String, dynamic>> allPredictions;
+  final bool isNormal;
 
   ScanResult({
     required this.imagePath,
@@ -44,6 +45,7 @@ class ScanResult {
     this.affectedPopulation = '',
     this.alsoKnownAs = '',
     this.allPredictions = const [],
+    this.isNormal = false,
   });
 
   String get confidencePercent => '${(confidence * 100).toStringAsFixed(1)}%';
@@ -69,6 +71,7 @@ class ScanResult {
         'affectedPopulation': affectedPopulation,
         'alsoKnownAs': alsoKnownAs,
         'allPredictions': allPredictions,
+        'isNormal': isNormal,
       };
 
   factory ScanResult.fromJson(Map<String, dynamic> e, [String? overrideImagePath]) => ScanResult(
@@ -95,6 +98,7 @@ class ScanResult {
                 ?.map((p) => Map<String, dynamic>.from(p as Map))
                 .toList() ??
             [],
+        isNormal: e['isNormal'] as bool? ?? e['is_normal'] as bool? ?? false,
       );
 
   ScanResult copyWith({
@@ -118,6 +122,7 @@ class ScanResult {
     String? affectedPopulation,
     String? alsoKnownAs,
     List<Map<String, dynamic>>? allPredictions,
+    bool? isNormal,
   }) =>
       ScanResult(
         id: id ?? this.id,
@@ -140,5 +145,6 @@ class ScanResult {
         affectedPopulation: affectedPopulation ?? this.affectedPopulation,
         alsoKnownAs: alsoKnownAs ?? this.alsoKnownAs,
         allPredictions: allPredictions ?? this.allPredictions,
+        isNormal: isNormal ?? this.isNormal,
       );
 }
