@@ -355,7 +355,11 @@ class PredictionResult(BaseModel):
 
 # ─── Skin Validation (1st Layer: RGB skin heuristic) ─────────
 def is_likely_skin_image(img: Image.Image) -> tuple[bool, str]:
-    """RGB skin heuristic — rejects images with < 10% skin-colored pixels."""
+    """
+    1st Layer: RGB YCrCb skin heuristic.
+    Rejects images where fewer than 10% of pixels fall in the
+    standard skin-tone range (Cr 133-173, Cb 77-127).
+    """
     img_small = img.convert("RGB").resize((64, 64))
     arr = np.array(img_small, dtype=np.float32)
 
@@ -364,16 +368,26 @@ def is_likely_skin_image(img: Image.Image) -> tuple[bool, str]:
     cr = (r - y) * 0.713 + 128
     cb = (b - y) * 0.564 + 128
 
+    std_y = float(np.std(y))
+
     skin_mask  = (cr >= 133) & (cr <= 173) & (cb >= 77) & (cb <= 127)
     skin_ratio = float(np.sum(skin_mask)) / (64 * 64)
 
-    logger.info(f"Skin pixel ratio: {skin_ratio:.2%}")
+    logger.info(f"Skin pixel ratio: {skin_ratio:.2%}, Texture variance: {std_y:.1f}")
 
     if skin_ratio < MIN_SKIN_PIXEL_RATIO:
         return False, (
             f"This image does not appear to contain recognizable skin "
             f"(skin pixel ratio: {skin_ratio:.0%} < 10%). "
             f"Please upload a clear photo of the affected skin area."
+        )
+
+    # Catch plain hand images (lots of skin, but no lesion texture)
+    if skin_ratio > 0.40 and std_y < 20.0:
+        return False, (
+            f"This image appears to be healthy skin without a visible lesion "
+            f"(texture variance: {std_y:.1f}). "
+            f"Please capture a clear photo centered on a visible skin lesion."
         )
 
     return True, "ok"

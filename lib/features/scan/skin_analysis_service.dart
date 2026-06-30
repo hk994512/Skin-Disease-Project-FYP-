@@ -309,7 +309,7 @@ class SkinAnalysisService {
   static const String _scanHistoryKey = 'scan_history';
   static const String _modelAsset = 'assets/models/skin_disease_model.tflite';
   static const int _inputSize = 224;
-  static const String _apiBaseUrl = 'http://10.8.30.244:8000';
+  static const String _apiBaseUrl = 'http://10.8.154.250:8000';
 
   // Three-layer validation:
   //   1st Layer: RGB skin heuristic (skin pixel ratio < 10% → rejected)
@@ -749,13 +749,18 @@ class SkinAnalysisService {
       '📱 Skin ratio: ${(skinRatio * 100).toStringAsFixed(1)}% | Y std: ${yStd.toStringAsFixed(1)}',
     );
 
-    // FIX BUG 8: loosened thresholds to match api.py
-    // OLD: skinRatio > 0.85 && yStd < 25.0
-    // NEW: skinRatio > 0.80 && yStd < 35.0
-    if (skinRatio > _skinRatioThreshold && yStd < _skinFlatnessStd) {
+    if (skinRatio < _skinRatioThreshold) {
       throw NotSkinImageException(
-        'Healthy skin detected (skin area: ${(skinRatio * 100).toStringAsFixed(0)}%, '
-        'texture variance: ${yStd.toStringAsFixed(1)}). '
+        'This image does not appear to contain recognizable skin '
+        '(skin pixel ratio: ${(skinRatio * 100).toStringAsFixed(0)}% < 10%). '
+        'Please upload a clear photo of the affected skin area.',
+      );
+    }
+
+    if (skinRatio > 0.40 && yStd < 20.0) {
+      throw NotSkinImageException(
+        'This image appears to be healthy skin without a visible lesion '
+        '(texture variance: ${yStd.toStringAsFixed(1)}). '
         'Please capture a clear photo centered on a visible skin lesion.',
       );
     }
