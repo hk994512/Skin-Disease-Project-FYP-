@@ -309,7 +309,7 @@ class SkinAnalysisService {
   static const String _scanHistoryKey = 'scan_history';
   static const String _modelAsset = 'assets/models/skin_disease_model.tflite';
   static const int _inputSize = 224;
-  static const String _apiBaseUrl = 'http://10.8.154.250:8000';
+  static const String _apiBaseUrl = 'http://10.8.162.241:8000';
 
   // Three-layer validation:
   //   1st Layer: RGB skin heuristic (skin pixel ratio < 10% → rejected)
@@ -317,10 +317,8 @@ class SkinAnalysisService {
   //   3rd Layer: Confidence threshold (< 40% → rejected)
   static const double _minConfidence = 0.40;
   static const double _maxEntropyThreshold = 1.80;
-
-  static const double _skinRatioThreshold = 0.10;
-  static const double _skinFlatnessStd =
-      -1.0; // Not used in three-layer validation
+  static const double _skinRatioThreshold =
+      0.10; // < 10% skin pixels → not a skin image
 
   final _uuid = const Uuid();
   Interpreter? _interpreter;
@@ -370,14 +368,52 @@ class SkinAnalysisService {
     );
   }
 
+  // ─── Preprocessing and Validation Pipeline ─────────────────────
+  Future<File> _preprocessImage(File imageFile) async {
+    final bytes = await imageFile.readAsBytes();
+    final decoded = img_lib.decodeImage(bytes);
+    if (decoded == null) throw Exception('Failed to decode image');
+
+    final int minDim = decoded.width < decoded.height
+        ? decoded.width
+        : decoded.height;
+    final int cropX = (decoded.width - minDim) ~/ 2;
+    final int cropY = (decoded.height - minDim) ~/ 2;
+    final cropped = img_lib.copyCrop(
+      decoded,
+      x: cropX,
+      y: cropY,
+      width: minDim,
+      height: minDim,
+    );
+    final resized = img_lib.copyResize(
+      cropped,
+      width: _inputSize,
+      height: _inputSize,
+    );
+
+    final tempDir = await getTemporaryDirectory();
+    final tempFile = File('${tempDir.path}/preprocessed_${_uuid.v4()}.jpg');
+    await tempFile.writeAsBytes(img_lib.encodeJpg(resized, quality: 90));
+    return tempFile;
+  }
+
   // ─── Main entry point ─────────────────────────────────────────
   Future<ScanResult> analyzeSkinImage(
     File imageFile, {
     BuildContext? context,
   }) async {
-    final savedImagePath = await _saveImageToLocalStorage(imageFile);
+    // 1️⃣ Validate on original image FIRST (before any preprocessing)
+    final rawBytes = await imageFile.readAsBytes();
+    final rawDecoded = img_lib.decodeImage(rawBytes);
+    if (rawDecoded == null) throw Exception('Failed to decode image');
+    _validateSkinImageLocal(rawDecoded);
 
-    // 1️⃣ Try API first
+    // 2️⃣ Now preprocess for model (crop + resize to 224x224)
+    final preprocessedFile = await _preprocessImage(imageFile);
+    final savedImagePath = await _saveImageToLocalStorage(preprocessedFile);
+
+    // 3️⃣ Try API — send ORIGINAL image so server metrics are on full photo
     try {
       final result = await _analyzeViaApi(imageFile, savedImagePath);
       await saveScanResult(result);
@@ -387,15 +423,14 @@ class SkinAnalysisService {
       }
       return result;
     } on NotSkinImageException {
-      // Deliberate rejection — do NOT fall back to TFLite
       rethrow;
     } catch (e) {
       debugPrint('❌ API FAILED: $e');
     }
 
-    // 2️⃣ Fallback to local TFLite
+    // 4️⃣ Fallback to local TFLite (uses preprocessed 224x224 file)
     try {
-      final result = await _analyzeViaLocal(imageFile, savedImagePath);
+      final result = await _analyzeViaLocal(preprocessedFile, savedImagePath);
       await saveScanResult(result);
       debugPrint('✅ Result from local TFLite');
       if (context != null && context.mounted) {
@@ -403,14 +438,11 @@ class SkinAnalysisService {
       }
       return result;
     } on NotSkinImageException {
-      // Deliberate rejection — do NOT swallow
       rethrow;
     } catch (e) {
       debugPrint('❌ LOCAL MODEL FAILED: $e');
     }
 
-    // 3️⃣ Both failed — no fake diagnosis
-    debugPrint('❌ Both API and local model failed — no prediction possible');
     throw Exception(
       'Analysis failed. Could not connect to the server and the on-device model '
       'encountered an error. Please check your internet connection and try again.',
@@ -583,47 +615,30 @@ class SkinAnalysisService {
     final decoded = img_lib.decodeImage(bytes);
     if (decoded == null) throw Exception('Failed to decode image');
 
-    // ── Step 1: Skin heuristic check ──────────────────────────
-    _validateSkinImageLocal(decoded);
+    // Skin validation already done in _preprocessAndValidateImage on original image.
+    // decoded here is already the 224x224 preprocessed file — skip re-validation.
 
-    // ── Step 2: Center-crop & Resize ───────────────────────
-    final int minDim = decoded.width < decoded.height
-        ? decoded.width
-        : decoded.height;
-    final int cropX = (decoded.width - minDim) ~/ 2;
-    final int cropY = (decoded.height - minDim) ~/ 2;
-    final cropped = img_lib.copyCrop(
-      decoded,
-      x: cropX,
-      y: cropY,
-      width: minDim,
-      height: minDim,
-    );
-
-    final resized = img_lib.copyResize(
-      cropped,
-      width: _inputSize,
-      height: _inputSize,
-    );
-
-    final inputBuffer = Float32List(_inputSize * _inputSize * 3);
+    // ── Step 1: Build input tensor from 224x224 image ────────
+    final int w = decoded.width;
+    final int h = decoded.height;
+    final inputBuffer = Float32List(w * h * 3);
     int idx = 0;
-    for (int y = 0; y < _inputSize; y++) {
-      for (int x = 0; x < _inputSize; x++) {
-        final pixel = resized.getPixel(x, y);
+    for (int y = 0; y < h; y++) {
+      for (int x = 0; x < w; x++) {
+        final pixel = decoded.getPixel(x, y);
         inputBuffer[idx++] = pixel.r / 255.0;
         inputBuffer[idx++] = pixel.g / 255.0;
         inputBuffer[idx++] = pixel.b / 255.0;
       }
     }
 
-    // ── Step 3: Run inference ─────────────────────────────────
+    // ── Step 2: Run inference ─────────────────────────────────
     final input = inputBuffer.reshape([1, _inputSize, _inputSize, 3]);
     final outputBuffer = Float32List(7);
     final output = outputBuffer.reshape([1, 7]);
     _interpreter!.run(input, output);
 
-    // ── Step 4: Entropy check — FIX BUG 5: was computed but never enforced
+    // ── Step 3: Entropy check ─────────────────────────────────
     final probsList = outputBuffer.toList();
     final entropy = _computeEntropyLocal(probsList);
     debugPrint('📱 Local entropy: ${entropy.toStringAsFixed(4)}');
@@ -636,27 +651,26 @@ class SkinAnalysisService {
       );
     }
 
-    // ── Step 5: Top class ─────────────────────────────────────
+    // ── Step 4: Top class ─────────────────────────────────────
     int topIdx = 0;
     for (int i = 1; i < outputBuffer.length; i++) {
       if (outputBuffer[i] > outputBuffer[topIdx]) topIdx = i;
     }
     final confidence = outputBuffer[topIdx];
 
-    // ── Step 6: Confidence check — FIX BUG 6: was never checked
+    // ── Step 5: Confidence check ──────────────────────────────
     debugPrint(
       '📱 Local confidence: ${(confidence * 100).toStringAsFixed(1)}%',
     );
-
     if (confidence < _minConfidence) {
       throw NotSkinImageException(
         'This image does not strongly match any of our 7 supported skin diseases '
-        '(confidence: ${(confidence * 100).toStringAsFixed(0)}% < 40%). '
+        '(confidence: ${(confidence * 100).toStringAsFixed(0)}% < 50%). '
         'It may be healthy skin or an unsupported condition.',
       );
     }
 
-    // ── Step 7: Build result ──────────────────────────────────
+    // ── Step 6: Build result ──────────────────────────────────
     final info = _classInfo[topIdx];
     final code = info['code']!;
     final detail = _diseaseDetails[code]!;
@@ -701,67 +715,82 @@ class SkinAnalysisService {
     );
   }
 
-  // ─── Local skin validator ─────────────────────────────────────
-  void _validateSkinImageLocal(img_lib.Image img) {
-    final smallImg = img_lib.copyResize(img, width: 64, height: 64);
+  // ─── Skin metrics helper ─────────────────────────────────
+  /// Returns (skinRatio, yStd, yStdBorder) from a 64x64 thumbnail of [img].
+  (double, double, double) _computeSkinMetrics(img_lib.Image img) {
+    final small = img_lib.copyResize(img, width: 64, height: 64);
     int skinCount = 0;
-    const totalPixels = 64 * 64;
-
-    final yValues = List.generate(64, (_) => List.filled(64, 0.0));
+    const total = 64 * 64;
     double sumY = 0.0;
+    final yVals = List.filled(total, 0.0);
+    int i = 0;
+
+    double sumBorderY = 0.0;
+    int borderCount = 0;
 
     for (int y = 0; y < 64; y++) {
       for (int x = 0; x < 64; x++) {
-        final pixel = smallImg.getPixel(x, y);
-        final r = pixel.r.toDouble();
-        final g = pixel.g.toDouble();
-        final b = pixel.b.toDouble();
+        final p = small.getPixel(x, y);
+        final r = p.r.toDouble();
+        final g = p.g.toDouble();
+        final b = p.b.toDouble();
+        final yv = 0.299 * r + 0.587 * g + 0.114 * b;
+        final cr = (r - yv) * 0.713 + 128;
+        final cb = (b - yv) * 0.564 + 128;
+        yVals[i++] = yv;
+        sumY += yv;
+        if (cr >= 125 && cr <= 175 && cb >= 75 && cb <= 135) skinCount++;
 
-        final yVal = 0.299 * r + 0.587 * g + 0.114 * b;
-        final cr = (r - yVal) * 0.713 + 128;
-        final cb = (b - yVal) * 0.564 + 128;
-
-        yValues[y][x] = yVal;
-        sumY += yVal;
-
-        // FIX BUG 8: widened Cr/Cb ranges to cover darker skin tones
-        // OLD: cr >= 133 && cr <= 173 && cb >= 77 && cb <= 127
-        // NEW: cr >= 125 && cr <= 175 && cb >= 75 && cb <= 135
-        if (cr >= 125 && cr <= 175 && cb >= 75 && cb <= 135) {
-          skinCount++;
+        // Border is the outer 8 pixels of the 64x64 grid
+        if (y < 8 || y >= 56 || x < 8 || x >= 56) {
+          sumBorderY += yv;
+          borderCount++;
         }
       }
     }
 
-    final skinRatio = skinCount / totalPixels;
-    final meanY = sumY / totalPixels;
-
+    final meanY = sumY / total;
     double sumSq = 0.0;
+    for (final yv in yVals) {
+      final d = yv - meanY;
+      sumSq += d * d;
+    }
+
+    final meanBorderY = sumBorderY / borderCount;
+    double sumSqBorder = 0.0;
+    i = 0;
     for (int y = 0; y < 64; y++) {
       for (int x = 0; x < 64; x++) {
-        final diff = yValues[y][x] - meanY;
-        sumSq += diff * diff;
+        final yv = yVals[i++];
+        if (y < 8 || y >= 56 || x < 8 || x >= 56) {
+          final d = yv - meanBorderY;
+          sumSqBorder += d * d;
+        }
       }
     }
-    final yStd = math.sqrt(sumSq / totalPixels);
+
+    return (
+      skinCount / total,
+      math.sqrt(sumSq / total),
+      math.sqrt(sumSqBorder / borderCount),
+    );
+  }
+
+  // ─── Local skin validator ─────────────────────────────────────
+  void _validateSkinImageLocal(img_lib.Image img) {
+    final (skinRatio, _, __) = _computeSkinMetrics(img);
 
     debugPrint(
-      '📱 Skin ratio: ${(skinRatio * 100).toStringAsFixed(1)}% | Y std: ${yStd.toStringAsFixed(1)}',
+      '\ud83d\udcf1 Skin ratio: ${(skinRatio * 100).toStringAsFixed(1)}%',
     );
 
+    // Only reject if no skin pixels at all — not a skin image
+    // All other checks (healthy skin, texture) are handled by the API
     if (skinRatio < _skinRatioThreshold) {
       throw NotSkinImageException(
-        'This image does not appear to contain recognizable skin '
+        'This image does not seem to contain recognizable skin '
         '(skin pixel ratio: ${(skinRatio * 100).toStringAsFixed(0)}% < 10%). '
         'Please upload a clear photo of the affected skin area.',
-      );
-    }
-
-    if (skinRatio > 0.40 && yStd < 20.0) {
-      throw NotSkinImageException(
-        'This image appears to be healthy skin without a visible lesion '
-        '(texture variance: ${yStd.toStringAsFixed(1)}). '
-        'Please capture a clear photo centered on a visible skin lesion.',
       );
     }
   }

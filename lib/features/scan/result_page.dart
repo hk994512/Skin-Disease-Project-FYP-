@@ -209,7 +209,7 @@ class _ResultPageState extends State<ResultPage> {
                           ),
                   ),
 
-                  if (s.confidence < 0.65) ...[
+                  if (s.confidence < 0.75) ...[
                     SizedBox(height: 32.h),
                     Container(
                       padding: EdgeInsets.all(16.r),
@@ -243,7 +243,7 @@ class _ResultPageState extends State<ResultPage> {
                                 ),
                                 SizedBox(height: 4.h),
                                 Text(
-                                  'The model is not highly certain. If you scanned healthy skin without a lesion, the model is forced to make a guess. Please only scan visible lesions.',
+                                  'The AI is not confident about this result and it may be incorrect. This model is trained on dermoscopy images and may not accurately classify regular phone photos. Please consult a dermatologist for a proper diagnosis.',
                                   style: context.textTheme.bodySmall?.copyWith(
                                     color: Colors.orange[900],
                                     height: 1.4,
@@ -499,7 +499,7 @@ class _ResultPageState extends State<ResultPage> {
                         ),
                 ),
 
-                if (s.confidence < 0.65) ...[
+                if (s.confidence < 0.75) ...[
                   SizedBox(height: 24.h),
                   Container(
                     padding: EdgeInsets.all(16.r),
@@ -533,7 +533,7 @@ class _ResultPageState extends State<ResultPage> {
                               ),
                               SizedBox(height: 4.h),
                               Text(
-                                'The model is not highly certain. If you scanned healthy skin without a lesion, the model is forced to make a guess. Please only scan visible lesions.',
+                                'The AI is not confident about this result and it may be incorrect. This model is trained on dermoscopy images and may not accurately classify regular phone photos. Please consult a dermatologist for a proper diagnosis.',
                                 style: context.textTheme.bodySmall?.copyWith(
                                   color: Colors.orange[900],
                                   height: 1.4,

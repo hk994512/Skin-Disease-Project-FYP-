@@ -7,7 +7,10 @@
 .buildlog/
 .history
 
-
+# Backend Python (venv & packages)
+backend/.venv/
+backend/venv/
+backend/__pycache__/
 
 # Flutter repo-specific
 /bin/cache/
